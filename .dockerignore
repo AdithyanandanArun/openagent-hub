@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+coverage
+**/coverage
+.git
+.env
+*.log
+storage/uploads/*
+storage/documents/*
+storage/images/*
+storage/exports/*
+storage/backups/*

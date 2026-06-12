@@ -1,0 +1,16 @@
+node_modules
+dist
+.next
+coverage
+.env
+*.log
+*.tsbuildinfo
+.idea
+.vscode
+.DS_Store
+storage/uploads/*
+storage/documents/*
+storage/images/*
+storage/exports/*
+storage/backups/*
+!storage/**/.gitkeep

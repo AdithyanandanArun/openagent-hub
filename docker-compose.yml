@@ -1,0 +1,114 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: /api
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - openagent
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      BACKEND_PORT: ${BACKEND_PORT:-3001}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://openagent:openagent@postgres:5432/openagent?schema=public}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-replace-with-32-byte-secret}
+      DEFAULT_PROVIDER_BASE_URL: ${DEFAULT_PROVIDER_BASE_URL:-http://host.docker.internal:11434/v1}
+      DEFAULT_PROVIDER_API_KEY: ${DEFAULT_PROVIDER_API_KEY:-}
+      STORAGE_ROOT: /app/storage
+      SKILLS_ROOT: /app/skills
+    volumes:
+      - ./storage:/app/storage
+      - ./skills:/app/skills:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - openagent
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-openagent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openagent}
+      POSTGRES_DB: ${POSTGRES_DB:-openagent}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - openagent
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - openagent
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.7
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks:
+      - openagent
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - openagent
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+networks:
+  openagent:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  qdrant-data:

@@ -1,0 +1,5 @@
+name: writing-assistant
+description: Improves clarity, structure, and tone for technical writing.
+version: 0.1.0
+instructions: |
+  Rewrite with concise language, preserve technical accuracy, and call out ambiguous claims.

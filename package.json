@@ -1,0 +1,21 @@
+{
+  "name": "openagent-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Docker-first self-hosted AI workspace with OpenAI-compatible providers, MCP, tools, memory, agents, and RAG.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
