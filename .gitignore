@@ -7,6 +7,7 @@ coverage
 *.tsbuildinfo
 .idea
 .vscode
+.serena
 .DS_Store
 storage/uploads/*
 storage/documents/*

@@ -1,0 +1,51 @@
+// FEATURE 4: Prisma Schema Additions
+// ============================================================
+// AGENT INSTRUCTIONS:
+//   1. Open prisma/schema.prisma
+//   2. Append EVERYTHING below the divider line into that file
+//   3. Ensure the User model has: conversations Conversation[]
+//      (add that relation field to the existing User model)
+//   4. Run: npx prisma migrate dev --name add_chat
+//   5. Run: npx prisma generate
+//
+// DEPENDENCY: User model from Feature 1 must exist first.
+// ============================================================
+
+// ── Add this relation to your EXISTING User model ─────────────────────────
+//
+//  model User {
+//    ...existing fields...
+//    conversations  Conversation[]   // ← ADD THIS LINE
+//  }
+
+// ── Paste these NEW models into schema.prisma ──────────────────────────────
+
+model Conversation {
+  id           String    @id @default(uuid())
+  userId       String
+  title        String?
+  systemPrompt String?   @db.Text
+  modelId      String?   // e.g. "gpt-4o", "claude-sonnet-4-6"
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages     Message[]
+
+  @@index([userId, updatedAt(sort: Desc)])
+}
+
+model Message {
+  id               String       @id @default(uuid())
+  conversationId   String
+  role             String       // "user" | "assistant" | "system"
+  content          String       @db.Text
+  parentMessageId  String?      // for branched conversations
+  createdAt        DateTime     @default(now())
+
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  parent           Message?     @relation("MessageBranch", fields: [parentMessageId], references: [id])
+  branches         Message[]    @relation("MessageBranch")
+
+  @@index([conversationId, createdAt])
+}
