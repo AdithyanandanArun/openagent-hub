@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 
 
@@ -7,6 +7,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[UUID] = None
     message: str
     model: Optional[str] = None
+    attachment_ids: Optional[List[UUID]] = None
 
 
 class ProviderConfigRequest(BaseModel):

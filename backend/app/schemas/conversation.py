@@ -10,7 +10,17 @@ class ConversationCreate(BaseModel):
 
 
 class ConversationUpdate(BaseModel):
-    title: str
+    title: Optional[str] = None
+    project_id: Optional[UUID] = None
+
+
+class AttachmentResponse(BaseModel):
+    id: UUID
+    filename: str
+    content_type: str
+    size: int
+
+    model_config = {"from_attributes": True}
 
 
 class MessageResponse(BaseModel):
@@ -18,6 +28,7 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     created_at: datetime
+    attachments: List["AttachmentResponse"] = []
 
     model_config = {"from_attributes": True}
 
@@ -26,6 +37,7 @@ class ConversationResponse(BaseModel):
     id: UUID
     title: str
     model: Optional[str]
+    project_id: Optional[UUID]
     created_at: datetime
     updated_at: datetime
 

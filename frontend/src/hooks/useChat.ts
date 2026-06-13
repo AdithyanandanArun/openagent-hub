@@ -19,8 +19,8 @@ export function useChat() {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const loadConversations = useCallback(async () => {
-    const list = await listConversations();
+  const loadConversations = useCallback(async (projectId?: string | null) => {
+    const list = await listConversations(projectId);
     setConversations(list);
     return list;
   }, []);
@@ -59,7 +59,7 @@ export function useChat() {
   );
 
   const sendMessage = useCallback(
-    async (message: string, model: string | null) => {
+    async (message: string, model: string | null, attachmentIds?: string[]) => {
       const token = localStorage.getItem('token');
       if (!token) return;
 
@@ -95,6 +95,7 @@ export function useChat() {
               id,
               title: 'New Conversation',
               model,
+              project_id: null,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
               messages: [userMessage],
@@ -109,13 +110,14 @@ export function useChat() {
             setCurrentConversation(detail);
           }
           const list = await listConversations();
-          setConversations(list);
+          setConversations(list); // refresh full list after stream
         },
         (err) => {
           setIsStreaming(false);
           setStreamingContent('');
           setError(err);
-        }
+        },
+        attachmentIds
       );
 
       abortRef.current = controller;

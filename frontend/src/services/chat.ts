@@ -1,16 +1,25 @@
 import api from './api';
 
+export interface MessageAttachment {
+  id: string;
+  filename: string;
+  content_type: string;
+  size: number;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   created_at: string;
+  attachments?: MessageAttachment[];
 }
 
 export interface Conversation {
   id: string;
   title: string;
   model: string | null;
+  project_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -28,8 +37,9 @@ export interface ProviderConfig {
   is_default: boolean;
 }
 
-export async function listConversations(): Promise<Conversation[]> {
-  const { data } = await api.get('/conversations');
+export async function listConversations(projectId?: string | null): Promise<Conversation[]> {
+  const params = projectId ? { project_id: projectId } : {};
+  const { data } = await api.get('/conversations', { params });
   return data;
 }
 
@@ -74,7 +84,8 @@ export function streamChat(
   onChunk: (chunk: string) => void,
   onConversationId: (id: string) => void,
   onDone: () => void,
-  onError: (error: string) => void
+  onError: (error: string) => void,
+  attachmentIds?: string[]
 ): AbortController {
   const controller = new AbortController();
 
@@ -84,7 +95,7 @@ export function streamChat(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ message, conversation_id: conversationId, model }),
+    body: JSON.stringify({ message, conversation_id: conversationId, model, attachment_ids: attachmentIds }),
     signal: controller.signal,
   })
     .then(async (response) => {

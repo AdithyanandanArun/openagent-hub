@@ -8,13 +8,11 @@ from uuid import UUID
 from fastapi import HTTPException
 
 
-def get_conversations(db: Session, user_id: UUID) -> List[Conversation]:
-    return (
-        db.query(Conversation)
-        .filter(Conversation.user_id == user_id)
-        .order_by(desc(Conversation.updated_at))
-        .all()
-    )
+def get_conversations(db: Session, user_id: UUID, project_id: UUID = None) -> List[Conversation]:
+    q = db.query(Conversation).filter(Conversation.user_id == user_id)
+    if project_id is not None:
+        q = q.filter(Conversation.project_id == project_id)
+    return q.order_by(desc(Conversation.updated_at)).all()
 
 
 def get_conversation(db: Session, conversation_id: UUID, user_id: UUID) -> Conversation:
@@ -37,7 +35,10 @@ def create_conversation(db: Session, user_id: UUID, data: ConversationCreate) ->
 
 def update_conversation(db: Session, conversation_id: UUID, user_id: UUID, data: ConversationUpdate) -> Conversation:
     conv = get_conversation(db, conversation_id, user_id)
-    conv.title = data.title
+    if data.title is not None:
+        conv.title = data.title
+    if data.project_id is not None:
+        conv.project_id = data.project_id
     db.commit()
     db.refresh(conv)
     return conv

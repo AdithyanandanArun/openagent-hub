@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 from app.core.database import get_db
 from app.services.auth_service import get_current_user
@@ -33,8 +33,12 @@ def _current_user(
 
 
 @router.get("", response_model=List[ConversationResponse])
-def list_conversations(user=Depends(_current_user), db: Session = Depends(get_db)):
-    return get_conversations(db, user.id)
+def list_conversations(
+    project_id: Optional[UUID] = Query(None),
+    user=Depends(_current_user),
+    db: Session = Depends(get_db),
+):
+    return get_conversations(db, user.id, project_id=project_id)
 
 
 @router.post("", response_model=ConversationResponse)

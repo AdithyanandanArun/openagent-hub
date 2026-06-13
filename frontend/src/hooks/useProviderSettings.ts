@@ -15,17 +15,10 @@ export function useProviderSettings() {
     try {
       const c = await getProviderConfig();
       setConfig(c);
+      return c;
     } catch {
       // no config yet
     }
-  }, []);
-
-  useEffect(() => { loadConfig(); }, [loadConfig]);
-
-  const saveConfig = useCallback(async (data: Partial<ProviderConfig>) => {
-    const updated = await updateProviderConfig(data);
-    setConfig(updated);
-    return updated;
   }, []);
 
   const loadModels = useCallback(async () => {
@@ -37,6 +30,18 @@ export function useProviderSettings() {
     } finally {
       setIsFetchingModels(false);
     }
+  }, []);
+
+  useEffect(() => {
+    loadConfig().then((c) => {
+      if (c?.api_key) loadModels().catch(() => {});
+    });
+  }, [loadConfig, loadModels]);
+
+  const saveConfig = useCallback(async (data: Partial<ProviderConfig>) => {
+    const updated = await updateProviderConfig(data);
+    setConfig(updated);
+    return updated;
   }, []);
 
   return { config, availableModels, isFetchingModels, saveConfig, loadModels, loadConfig };
