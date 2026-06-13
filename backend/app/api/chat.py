@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db, SessionLocal
 from app.core.provider import stream_chat
 from app.services.auth_service import get_current_user
+from app.services.provider_service import has_enabled_providers
+from app.services.router_service import route_chat
 from app.services.conversation_service import (
     create_conversation,
     get_conversation,
@@ -117,22 +119,25 @@ async def chat_stream(
     api_key = provider.api_key
     model = request.model or provider.model
     conv_id: UUID = conv.id
+    user_id: UUID = user.id
+    preferred_provider_id = str(request.provider_id) if request.provider_id else None
+    use_router = has_enabled_providers(db, user.id)
 
     async def generate():
         full_response = ""
         try:
             yield f"data: {json.dumps({'type': 'conversation_id', 'conversation_id': str(conv_id)})}\n\n"
 
-            async for chunk in stream_chat(
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                messages=messages,
-            ):
-                full_response += chunk
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+            with SessionLocal() as stream_db:
+                if use_router:
+                    chunks = route_chat(stream_db, user_id, model, messages, preferred_provider_id)
+                else:
+                    chunks = stream_chat(base_url=base_url, api_key=api_key, model=model, messages=messages)
 
-            # Open a fresh session for the write — the DI session is already closed here
+                async for chunk in chunks:
+                    full_response += chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+
             with SessionLocal() as fresh_db:
                 add_message(fresh_db, conv_id, "assistant", full_response)
 

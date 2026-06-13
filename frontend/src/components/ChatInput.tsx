@@ -2,6 +2,7 @@ import { useState, useRef, KeyboardEvent } from 'react';
 import { Send, Square, Paperclip, X, FileText, Image, ChevronDown } from 'lucide-react';
 import clsx from 'clsx';
 import { uploadAttachment, AttachmentMeta } from '../services/attachments';
+import { ProviderModel } from '../hooks/useProviders';
 
 interface Props {
   onSend: (message: string, attachmentIds: string[]) => void;
@@ -10,7 +11,8 @@ interface Props {
   disabled?: boolean;
   model: string;
   availableModels: string[];
-  onModelChange: (model: string) => void;
+  providerModels?: ProviderModel[];
+  onModelChange: (model: string, providerId?: string | null) => void;
 }
 
 function FileChip({ att, onRemove }: { att: AttachmentMeta; onRemove: () => void }) {
@@ -26,23 +28,48 @@ function FileChip({ att, onRemove }: { att: AttachmentMeta; onRemove: () => void
   );
 }
 
-function ModelPicker({ model, availableModels, onChange }: { model: string; availableModels: string[]; onChange: (m: string) => void }) {
+function ModelPicker({
+  model,
+  availableModels,
+  providerModels,
+  onChange,
+}: {
+  model: string;
+  availableModels: string[];
+  providerModels?: ProviderModel[];
+  onChange: (m: string, providerId?: string | null) => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const models = availableModels.length > 0 ? availableModels : (model ? [model] : []);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault(); // prevent textarea blur
+    e.preventDefault();
     setOpen((o) => !o);
   };
 
+  // Group by provider when providerModels is populated
+  const hasProviders = providerModels && providerModels.length > 0;
+
+  // Build grouped structure
+  const groups: { provider_id: string; provider_name: string; models: string[] }[] = [];
+  if (hasProviders) {
+    const seen = new Map<string, number>();
+    for (const pm of providerModels!) {
+      if (!seen.has(pm.provider_id)) {
+        seen.set(pm.provider_id, groups.length);
+        groups.push({ provider_id: pm.provider_id, provider_name: pm.provider_name, models: [] });
+      }
+      groups[seen.get(pm.provider_id)!].models.push(pm.model);
+    }
+  }
+
+  const flatModels = !hasProviders ? (availableModels.length > 0 ? availableModels : model ? [model] : []) : [];
+  const isEmpty = hasProviders ? groups.length === 0 : flatModels.length === 0;
+
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
-        onMouseDown={handleMouseDown}
-        className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors rounded-md px-1.5 py-1 hover:bg-zinc-700"
-      >
+      <button type="button" onMouseDown={handleMouseDown}
+        className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors rounded-md px-1.5 py-1 hover:bg-zinc-700">
         <span className="max-w-[140px] truncate">{model || 'Select model'}</span>
         <ChevronDown size={11} className={clsx('transition-transform flex-shrink-0', open && 'rotate-180')} />
       </button>
@@ -50,21 +77,32 @@ function ModelPicker({ model, availableModels, onChange }: { model: string; avai
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 mb-1 w-64 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 overflow-hidden">
-            {models.length === 0 ? (
-              <p className="text-zinc-500 text-xs px-3 py-3">No models — open Settings to fetch models.</p>
+          <div className="absolute bottom-full left-0 mb-1 w-72 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+            {isEmpty ? (
+              <p className="text-zinc-500 text-xs px-3 py-3">No models — open Settings → Providers to add one.</p>
+            ) : hasProviders ? (
+              <div className="max-h-64 overflow-y-auto py-1">
+                {groups.map((g) => (
+                  <div key={g.provider_id}>
+                    <p className="px-3 pt-2 pb-1 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{g.provider_name}</p>
+                    {g.models.map((m) => (
+                      <button key={`${g.provider_id}:${m}`} type="button"
+                        onMouseDown={(e) => { e.preventDefault(); onChange(m, g.provider_id); setOpen(false); }}
+                        className={clsx('w-full text-left px-3 py-1.5 text-sm transition-colors truncate pl-4',
+                          m === model ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}>
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
             ) : (
-              <div className="max-h-52 overflow-y-auto py-1">
-                {models.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onMouseDown={(e) => { e.preventDefault(); onChange(m); setOpen(false); }}
-                    className={clsx(
-                      'w-full text-left px-3 py-2 text-sm transition-colors truncate',
-                      m === model ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700'
-                    )}
-                  >
+              <div className="max-h-64 overflow-y-auto py-1">
+                {flatModels.map((m) => (
+                  <button key={m} type="button"
+                    onMouseDown={(e) => { e.preventDefault(); onChange(m, null); setOpen(false); }}
+                    className={clsx('w-full text-left px-3 py-2 text-sm transition-colors truncate',
+                      m === model ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}>
                     {m}
                   </button>
                 ))}
@@ -77,7 +115,7 @@ function ModelPicker({ model, availableModels, onChange }: { model: string; avai
   );
 }
 
-export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availableModels, onModelChange }: Props) {
+export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availableModels, providerModels, onModelChange }: Props) {
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -166,7 +204,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
             >
               <Paperclip size={15} className={uploading ? 'animate-pulse' : ''} />
             </button>
-            <ModelPicker model={model} availableModels={availableModels} onChange={onModelChange} />
+            <ModelPicker model={model} availableModels={availableModels} providerModels={providerModels} onChange={onModelChange} />
           </div>
 
           <button

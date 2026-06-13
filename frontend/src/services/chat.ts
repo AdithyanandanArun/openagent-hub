@@ -85,7 +85,8 @@ export function streamChat(
   onConversationId: (id: string) => void,
   onDone: () => void,
   onError: (error: string) => void,
-  attachmentIds?: string[]
+  attachmentIds?: string[],
+  providerId?: string | null,
 ): AbortController {
   const controller = new AbortController();
 
@@ -95,7 +96,7 @@ export function streamChat(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ message, conversation_id: conversationId, model, attachment_ids: attachmentIds }),
+    body: JSON.stringify({ message, conversation_id: conversationId, model, attachment_ids: attachmentIds, provider_id: providerId ?? null }),
     signal: controller.signal,
   })
     .then(async (response) => {

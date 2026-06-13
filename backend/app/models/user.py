@@ -19,4 +19,5 @@ class User(Base):
 
     conversations = relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
     provider_configs = relationship("ProviderConfig", back_populates="user", cascade="all, delete-orphan")
+    providers = relationship("Provider", back_populates="user", cascade="all, delete-orphan")
     projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")

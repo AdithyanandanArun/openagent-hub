@@ -7,6 +7,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[UUID] = None
     message: str
     model: Optional[str] = None
+    provider_id: Optional[UUID] = None
     attachment_ids: Optional[List[UUID]] = None
 
 

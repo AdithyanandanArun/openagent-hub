@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Bot } from 'lucide-react';
@@ -21,10 +21,50 @@ interface Props {
 
 export function ChatWindow({ conversation, isStreaming, streamingContent, thinkingLabel = 'Thinking', error, onEditMessage, onRegenerate }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true); // true = auto-scroll to bottom
 
+  const scrollToBottom = useCallback((instant = false) => {
+    bottomRef.current?.scrollIntoView({ behavior: instant ? 'instant' : 'smooth' });
+  }, []);
+
+  // Track whether user manually scrolled away from the bottom
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    pinnedRef.current = distanceFromBottom < 80;
+  }, []);
+
+  // Scroll on new message or streaming chunks — only if pinned
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [conversation?.messages.length, streamingContent]);
+    if (pinnedRef.current) scrollToBottom(!!streamingContent);
+  }, [conversation?.messages.length, streamingContent, scrollToBottom]);
+
+  // ResizeObserver: re-scroll when content grows (code highlighting / KaTeX reflow)
+  // Only fires if we're already pinned
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedRef.current) scrollToBottom(true);
+    });
+    // Observe the inner content div, not the scroll container itself
+    const inner = container.firstElementChild;
+    if (inner) observer.observe(inner);
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
+
+  // When a new conversation starts / user sends a message: re-pin
+  const prevMessageCount = useRef(0);
+  useEffect(() => {
+    const count = conversation?.messages.length ?? 0;
+    if (count > prevMessageCount.current) {
+      pinnedRef.current = true;
+      scrollToBottom(false);
+    }
+    prevMessageCount.current = count;
+  }, [conversation?.messages.length, scrollToBottom]);
 
   if (!conversation && !isStreaming) {
     return (
@@ -39,7 +79,7 @@ export function ChatWindow({ conversation, isStreaming, streamingContent, thinki
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" onScroll={handleScroll}>
       <div className="py-4 max-w-5xl mx-auto w-full">
         {conversation?.messages.map((msg, idx, arr) => {
           const isLastAssistant =

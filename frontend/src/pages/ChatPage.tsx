@@ -6,6 +6,7 @@ import { ProviderSettingsDialog } from '../components/ProviderSettingsDialog';
 import { useChat } from '../hooks/useChat';
 import { useProjects } from '../hooks/useProjects';
 import { useProviderSettings } from '../hooks/useProviderSettings';
+import { useProviders } from '../hooks/useProviders';
 import { User } from '../services/auth';
 import { ProviderConfig } from '../services/chat';
 
@@ -34,7 +35,10 @@ export function ChatPage({ user, onLogout }: Props) {
 
   const { projects, loadProjects, addProject, renameProject, removeProject } = useProjects();
   const { config, availableModels, saveConfig, loadModels, loadConfig } = useProviderSettings();
+  const { providerModels, refreshModels } = useProviders();
+
   const [selectedModel, setSelectedModel] = useState('');
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [thinkingLabel, setThinkingLabel] = useState('Thinking');
@@ -44,13 +48,24 @@ export function ChatPage({ user, onLogout }: Props) {
     loadProjects();
   }, [loadConversations, loadProjects, selectedProjectId]);
 
+  // Set initial model from single config if no provider model selected yet
   useEffect(() => {
     if (config?.model && !selectedModel) setSelectedModel(config.model);
   }, [config, selectedModel]);
 
+  const handleModelChange = (model: string, providerId?: string | null) => {
+    setSelectedModel(model);
+    setSelectedProviderId(providerId ?? null);
+  };
+
   const handleSend = (message: string, attachmentIds: string[]) => {
     setThinkingLabel(attachmentIds.length > 0 ? 'Analysing' : 'Thinking');
-    sendMessage(message, selectedModel || null, attachmentIds.length ? attachmentIds : undefined);
+    sendMessage(
+      message,
+      selectedModel || null,
+      attachmentIds.length ? attachmentIds : undefined,
+      selectedProviderId,
+    );
   };
 
   const handleSettingsSave = async (data: Partial<ProviderConfig>) => {
@@ -68,6 +83,9 @@ export function ChatPage({ user, onLogout }: Props) {
     loadModels().catch(() => {});
     setShowSettings(true);
   };
+
+  // Decide which model list to show: use providerModels if available, else flat list
+  const hasProviderModels = providerModels.length > 0;
 
   return (
     <div className="flex h-screen bg-zinc-950 text-white overflow-hidden">
@@ -95,18 +113,19 @@ export function ChatPage({ user, onLogout }: Props) {
           streamingContent={streamingContent}
           thinkingLabel={thinkingLabel}
           error={error}
-          onEditMessage={(id, content) => editMessage(id, content, selectedModel || null)}
-          onRegenerate={() => regenerateResponse(selectedModel || null)}
+          onEditMessage={(id, content) => editMessage(id, content, selectedModel || null, selectedProviderId)}
+          onRegenerate={() => regenerateResponse(selectedModel || null, selectedProviderId)}
         />
 
         <ChatInput
           onSend={handleSend}
           onStop={stopStreaming}
           isStreaming={isStreaming}
-          disabled={!config?.model && !selectedModel}
+          disabled={!hasProviderModels && !config?.model && !selectedModel}
           model={selectedModel}
           availableModels={availableModels}
-          onModelChange={setSelectedModel}
+          providerModels={hasProviderModels ? providerModels : undefined}
+          onModelChange={handleModelChange}
         />
       </div>
 
@@ -119,6 +138,7 @@ export function ChatPage({ user, onLogout }: Props) {
           username={user.username}
           email={user.email}
           onLogout={onLogout}
+          onProvidersChange={refreshModels}
         />
       )}
     </div>

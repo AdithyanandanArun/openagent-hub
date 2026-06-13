@@ -59,7 +59,7 @@ export function useChat() {
   );
 
   const sendMessage = useCallback(
-    async (message: string, model: string | null, attachmentIds?: string[]) => {
+    async (message: string, model: string | null, attachmentIds?: string[], providerId?: string | null) => {
       const token = localStorage.getItem('token');
       if (!token) return;
 
@@ -117,7 +117,8 @@ export function useChat() {
           setStreamingContent('');
           setError(err);
         },
-        attachmentIds
+        attachmentIds,
+        providerId,
       );
 
       abortRef.current = controller;
@@ -132,22 +133,21 @@ export function useChat() {
   }, []);
 
   const editMessage = useCallback(
-    async (messageId: string, newContent: string, model: string | null) => {
+    async (messageId: string, newContent: string, model: string | null, providerId?: string | null) => {
       if (!currentConversation) return;
       await truncateConversation(currentConversation.id, messageId);
-      // Optimistically remove truncated messages from UI
       setCurrentConversation((prev) => {
         if (!prev) return prev;
         const idx = prev.messages.findIndex((m) => m.id === messageId);
         return idx === -1 ? prev : { ...prev, messages: prev.messages.slice(0, idx) };
       });
-      await sendMessage(newContent, model);
+      await sendMessage(newContent, model, undefined, providerId);
     },
     [currentConversation, sendMessage]
   );
 
   const regenerateResponse = useCallback(
-    async (model: string | null) => {
+    async (model: string | null, providerId?: string | null) => {
       if (!currentConversation) return;
       const msgs = currentConversation.messages;
       const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
@@ -159,7 +159,7 @@ export function useChat() {
         const idx = prev.messages.findIndex((m) => m.id === lastAssistant.id);
         return idx === -1 ? prev : { ...prev, messages: prev.messages.slice(0, idx) };
       });
-      await sendMessage(lastUser.content, model);
+      await sendMessage(lastUser.content, model, undefined, providerId);
     },
     [currentConversation, sendMessage]
   );

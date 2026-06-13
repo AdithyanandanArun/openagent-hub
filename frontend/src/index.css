@@ -5,6 +5,7 @@
 html, body, #root {
   overflow: hidden;
   height: 100%;
+  background-color: #09090b; /* zinc-950 — prevents white flash/bleed in dark mode */
 }
 
 * {

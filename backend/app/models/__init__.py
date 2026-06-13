@@ -4,3 +4,4 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.attachment import Attachment
 from app.models.provider_config import ProviderConfig
+from app.models.provider import Provider
