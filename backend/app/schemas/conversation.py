@@ -34,3 +34,7 @@ class ConversationResponse(BaseModel):
 
 class ConversationDetailResponse(ConversationResponse):
     messages: List[MessageResponse] = []
+
+
+class TruncateRequest(BaseModel):
+    from_message_id: UUID

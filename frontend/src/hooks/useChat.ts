@@ -4,6 +4,7 @@ import {
   getConversation,
   deleteConversation as apiDelete,
   renameConversation as apiRename,
+  truncateConversation,
   streamChat,
   Conversation,
   ConversationDetail,
@@ -128,6 +129,39 @@ export function useChat() {
     setStreamingContent('');
   }, []);
 
+  const editMessage = useCallback(
+    async (messageId: string, newContent: string, model: string | null) => {
+      if (!currentConversation) return;
+      await truncateConversation(currentConversation.id, messageId);
+      // Optimistically remove truncated messages from UI
+      setCurrentConversation((prev) => {
+        if (!prev) return prev;
+        const idx = prev.messages.findIndex((m) => m.id === messageId);
+        return idx === -1 ? prev : { ...prev, messages: prev.messages.slice(0, idx) };
+      });
+      await sendMessage(newContent, model);
+    },
+    [currentConversation, sendMessage]
+  );
+
+  const regenerateResponse = useCallback(
+    async (model: string | null) => {
+      if (!currentConversation) return;
+      const msgs = currentConversation.messages;
+      const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
+      const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
+      if (!lastAssistant || !lastUser) return;
+      await truncateConversation(currentConversation.id, lastAssistant.id);
+      setCurrentConversation((prev) => {
+        if (!prev) return prev;
+        const idx = prev.messages.findIndex((m) => m.id === lastAssistant.id);
+        return idx === -1 ? prev : { ...prev, messages: prev.messages.slice(0, idx) };
+      });
+      await sendMessage(lastUser.content, model);
+    },
+    [currentConversation, sendMessage]
+  );
+
   return {
     conversations,
     currentConversation,
@@ -141,5 +175,7 @@ export function useChat() {
     renameConversation,
     sendMessage,
     stopStreaming,
+    editMessage,
+    regenerateResponse,
   };
 }

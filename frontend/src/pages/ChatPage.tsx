@@ -29,6 +29,8 @@ export function ChatPage({ user, onLogout }: Props) {
     renameConversation,
     sendMessage,
     stopStreaming,
+    editMessage,
+    regenerateResponse,
   } = useChat();
 
   const { config, availableModels, saveConfig, loadModels, loadConfig } = useProviderSettings();
@@ -87,6 +89,8 @@ export function ChatPage({ user, onLogout }: Props) {
           isStreaming={isStreaming}
           streamingContent={streamingContent}
           error={error}
+          onEditMessage={(id, content) => editMessage(id, content, selectedModel || null)}
+          onRegenerate={() => regenerateResponse(selectedModel || null)}
         />
 
         <ChatInput

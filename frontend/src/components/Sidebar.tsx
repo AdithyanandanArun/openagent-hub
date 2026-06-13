@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, MessageSquare, Trash2, Edit2, Check, X } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, Edit2, Check, X, Search } from 'lucide-react';
 import clsx from 'clsx';
 import { Conversation } from '../services/chat';
 
@@ -41,6 +41,7 @@ function groupByDate(convs: Conversation[]) {
 export function Sidebar({ conversations, currentId, onSelect, onNew, onDelete, onRename, username, onLogout }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [search, setSearch] = useState('');
 
   const startEdit = (id: string, title: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -59,7 +60,10 @@ export function Sidebar({ conversations, currentId, onSelect, onNew, onDelete, o
     setEditingId(null);
   };
 
-  const groups = groupByDate(conversations);
+  const filtered = search.trim()
+    ? conversations.filter((c) => c.title.toLowerCase().includes(search.toLowerCase()))
+    : conversations;
+  const groups = groupByDate(filtered);
 
   return (
     <div className="w-64 bg-zinc-950 flex flex-col h-full border-r border-zinc-800 flex-shrink-0">
@@ -67,7 +71,7 @@ export function Sidebar({ conversations, currentId, onSelect, onNew, onDelete, o
         <span className="text-sm font-semibold text-zinc-300 px-2">OpenAgent Hub</span>
       </div>
 
-      <div className="p-2">
+      <div className="p-2 flex flex-col gap-1.5">
         <button
           onClick={onNew}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-sm transition-colors"
@@ -75,6 +79,15 @@ export function Sidebar({ conversations, currentId, onSelect, onNew, onDelete, o
           <Plus size={15} />
           New Chat
         </button>
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 focus-within:border-zinc-600 transition-colors">
+          <Search size={12} className="text-zinc-500 flex-shrink-0" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search conversations..."
+            className="flex-1 bg-transparent text-xs text-zinc-300 placeholder-zinc-600 outline-none"
+          />
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 pb-2">

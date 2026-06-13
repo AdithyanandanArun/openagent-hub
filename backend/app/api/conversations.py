@@ -11,12 +11,14 @@ from app.services.conversation_service import (
     create_conversation,
     update_conversation,
     delete_conversation,
+    truncate_messages,
 )
 from app.schemas.conversation import (
     ConversationCreate,
     ConversationUpdate,
     ConversationResponse,
     ConversationDetailResponse,
+    TruncateRequest,
 )
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -58,4 +60,16 @@ def update(
 @router.delete("/{conversation_id}")
 def delete(conversation_id: UUID, user=Depends(_current_user), db: Session = Depends(get_db)):
     delete_conversation(db, conversation_id, user.id)
+    return {"ok": True}
+
+
+@router.post("/{conversation_id}/truncate")
+def truncate(
+    conversation_id: UUID,
+    body: TruncateRequest,
+    user=Depends(_current_user),
+    db: Session = Depends(get_db),
+):
+    get_conversation(db, conversation_id, user.id)  # ownership check
+    truncate_messages(db, conversation_id, body.from_message_id)
     return {"ok": True}

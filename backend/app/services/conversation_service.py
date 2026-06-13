@@ -57,6 +57,20 @@ def add_message(db: Session, conversation_id: UUID, role: str, content: str) -> 
     return msg
 
 
+def truncate_messages(db: Session, conversation_id: UUID, from_message_id: UUID) -> None:
+    pivot = db.query(Message).filter(
+        Message.id == from_message_id,
+        Message.conversation_id == conversation_id,
+    ).first()
+    if not pivot:
+        return
+    db.query(Message).filter(
+        Message.conversation_id == conversation_id,
+        Message.created_at >= pivot.created_at,
+    ).delete(synchronize_session=False)
+    db.commit()
+
+
 def auto_title_conversation(db: Session, conversation_id: UUID, first_message: str) -> None:
     conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     if conv and conv.title == "New Conversation":

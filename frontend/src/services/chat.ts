@@ -57,6 +57,10 @@ export async function updateProviderConfig(config: Partial<ProviderConfig>): Pro
   return data;
 }
 
+export async function truncateConversation(conversationId: string, fromMessageId: string): Promise<void> {
+  await api.post(`/conversations/${conversationId}/truncate`, { from_message_id: fromMessageId });
+}
+
 export async function fetchModels(): Promise<string[]> {
   const { data } = await api.get('/provider/models');
   return data.models;

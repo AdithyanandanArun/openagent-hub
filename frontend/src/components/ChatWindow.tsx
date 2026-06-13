@@ -12,9 +12,11 @@ interface Props {
   isStreaming: boolean;
   streamingContent: string;
   error: string | null;
+  onEditMessage?: (messageId: string, newContent: string) => void;
+  onRegenerate?: () => void;
 }
 
-export function ChatWindow({ conversation, isStreaming, streamingContent, error }: Props) {
+export function ChatWindow({ conversation, isStreaming, streamingContent, error, onEditMessage, onRegenerate }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -36,9 +38,21 @@ export function ChatWindow({ conversation, isStreaming, streamingContent, error 
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="py-4">
-        {conversation?.messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
+        {conversation?.messages.map((msg, idx, arr) => {
+          const isLastAssistant =
+            msg.role === 'assistant' &&
+            !isStreaming &&
+            arr.slice(idx + 1).every((m) => m.role !== 'assistant');
+          return (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              isLastAssistant={isLastAssistant}
+              onEdit={onEditMessage}
+              onRegenerate={isLastAssistant ? onRegenerate : undefined}
+            />
+          );
+        })}
 
         {isStreaming && streamingContent && (
           <div className="flex gap-3 px-4 py-3">
