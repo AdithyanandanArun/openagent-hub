@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.provider import ProviderSettings, get_provider_settings
 from app.core.security import get_current_user_id
 from app.schemas.chat import ChatRequest, ChatStreamRequest, MessageResponse
 from app.services.llm_service import LLMService
@@ -14,9 +15,10 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 async def chat(
     data: ChatRequest,
     user_id: str = Depends(get_current_user_id),
+    provider: ProviderSettings = Depends(get_provider_settings),
     db: AsyncSession = Depends(get_db),
 ):
-    service = LLMService(db)
+    service = LLMService(db, provider)
     message = await service.chat(
         conversation_id=data.conversation_id,
         user_id=user_id,
@@ -30,9 +32,10 @@ async def chat(
 async def chat_stream(
     data: ChatStreamRequest,
     user_id: str = Depends(get_current_user_id),
+    provider: ProviderSettings = Depends(get_provider_settings),
     db: AsyncSession = Depends(get_db),
 ):
-    service = LLMService(db)
+    service = LLMService(db, provider)
 
     async def event_generator():
         async for chunk in service.chat_stream(

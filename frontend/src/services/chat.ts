@@ -1,5 +1,6 @@
 import { apiRequest, getApiUrl } from "./api";
 import type { Conversation, Message, ModelInfo, StreamEvent } from "../types/chat";
+import type { ProviderSettings } from "../types/provider";
 
 export async function listConversations(token: string): Promise<Conversation[]> {
   const data = await apiRequest<{ conversations: Conversation[]; total: number }>(
@@ -39,8 +40,17 @@ export async function listMessages(token: string, conversationId: string): Promi
   return data.messages;
 }
 
-export async function listModels(token: string): Promise<ModelInfo[]> {
-  const data = await apiRequest<{ models: ModelInfo[] }>("/models", token);
+function providerHeaders(provider: ProviderSettings): HeadersInit {
+  return {
+    "X-Provider-Api-Key": provider.apiKey,
+    "X-Provider-Base-Url": provider.baseUrl,
+  };
+}
+
+export async function listModels(token: string, provider: ProviderSettings): Promise<ModelInfo[]> {
+  const data = await apiRequest<{ models: ModelInfo[] }>("/models", token, {
+    headers: providerHeaders(provider),
+  });
   return data.models;
 }
 
@@ -49,6 +59,7 @@ export async function streamChat(
   conversationId: string,
   message: string,
   model: string,
+  provider: ProviderSettings,
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal
 ): Promise<void> {
@@ -57,6 +68,7 @@ export async function streamChat(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
+      ...providerHeaders(provider),
     },
     body: JSON.stringify({ conversation_id: conversationId, message, model }),
     signal,

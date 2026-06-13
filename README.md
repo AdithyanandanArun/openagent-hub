@@ -68,6 +68,8 @@ postgresql+asyncpg://chatuser:chatpassword@localhost:5432/chatdb
 - Create, rename, delete, and browse conversations
 - Persist all conversations and messages in PostgreSQL
 - Select from configured AI models
+- Add an OpenAI-compatible provider key/base URL in the app
+- Fetch and select models exposed by that provider's `/models` endpoint
 - Stream assistant responses token-by-token with Server-Sent Events
 - Render markdown, tables, lists, and syntax-highlighted code blocks
 - Copy code blocks from assistant responses
@@ -82,7 +84,7 @@ The implementation follows the requested `ai-chat-app/` structure. Backend code 
 Required environment variables:
 
 - `DATABASE_URL`
-- `OPENAI_API_KEY`
+- `OPENAI_API_KEY` optional fallback if users do not enter a provider key in the app
 - `OPENAI_BASE_URL`
 - `JWT_SECRET`
 - `FRONTEND_URL`
@@ -93,6 +95,16 @@ Docker Compose also uses:
 - `POSTGRES_PASSWORD`
 - `POSTGRES_DB`
 - `VITE_API_URL`
+- `VITE_PROVIDER_BASE_URL`
+
+## Provider Settings In The App
+
+After signing in, open the key button in the header. Add:
+
+- Base URL, for example `http://localhost:3001/v1`
+- API key from your OpenAI-compatible provider
+
+Click **Fetch models** to load the models available to that key. The browser stores these provider settings locally and sends them to the backend on `/models`, `/chat`, and `/chat/stream` requests.
 
 ## Migrations
 

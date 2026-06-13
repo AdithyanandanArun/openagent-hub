@@ -38,7 +38,7 @@ export default function ChatInput({ disabled, isStreaming, onSend, onStop }: Cha
           onKeyDown={handleKeyDown}
           disabled={disabled}
           rows={1}
-          placeholder="Message AI Chat"
+          placeholder={disabled ? "Configure provider settings first" : "Message AI Chat"}
           className="max-h-40 min-h-12 flex-1 resize-none rounded-md border border-white/10 bg-ink-950 px-4 py-3 text-base leading-6 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-mint-300 focus:ring-2 focus:ring-mint-300/20 disabled:cursor-not-allowed disabled:opacity-60"
         />
         {isStreaming ? (

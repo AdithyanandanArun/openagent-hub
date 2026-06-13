@@ -8,6 +8,13 @@ All endpoints except `/auth/register`, `/auth/login`, and `/health` require:
 Authorization: Bearer <token>
 ```
 
+Chat and model endpoints can also receive per-request OpenAI-compatible provider settings:
+
+```text
+X-Provider-Api-Key: <provider-api-key>
+X-Provider-Base-Url: http://localhost:3001/v1
+```
+
 ## Authentication
 
 `POST /auth/register`
@@ -102,7 +109,14 @@ data: {"message_id":"...","conversation_id":"...","title":"..."}
 
 `GET /models`
 
-Returns configured model metadata for the selector.
+Returns model metadata from the configured provider. Example:
+
+```bash
+curl http://localhost:8000/models \
+  -H "Authorization: Bearer <app-token>" \
+  -H "X-Provider-Api-Key: <provider-api-key>" \
+  -H "X-Provider-Base-Url: http://localhost:3001/v1"
+```
 
 ## Health
 

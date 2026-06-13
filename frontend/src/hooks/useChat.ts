@@ -9,8 +9,9 @@ import {
   streamChat,
 } from "../services/chat";
 import type { Conversation, Message, ModelInfo } from "../types/chat";
+import type { ProviderSettings } from "../types/provider";
 
-export function useChat(token: string) {
+export function useChat(token: string, provider: ProviderSettings, providerConfigured: boolean) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -35,11 +36,13 @@ export function useChat(token: string) {
       try {
         const [conversationItems, modelItems] = await Promise.all([
           listConversations(token),
-          listModels(token),
+          providerConfigured ? listModels(token, provider) : Promise.resolve([]),
         ]);
         if (!mounted) return;
         setModels(modelItems);
-        setSelectedModel(modelItems[0]?.id ?? "gpt-4o-mini");
+        setSelectedModel((current) =>
+          modelItems.some((model) => model.id === current) ? current : modelItems[0]?.id ?? ""
+        );
         setConversations(conversationItems);
         if (conversationItems[0]) {
           setActiveConversationId(conversationItems[0].id);
@@ -60,7 +63,22 @@ export function useChat(token: string) {
       mounted = false;
       abortRef.current?.abort();
     };
-  }, [token]);
+  }, [provider, providerConfigured, token]);
+
+  const refreshModels = useCallback(async (overrideProvider?: ProviderSettings) => {
+    const nextProvider = overrideProvider ?? provider;
+    const isReady = Boolean(nextProvider.apiKey && nextProvider.baseUrl);
+    if (!isReady) {
+      setModels([]);
+      setSelectedModel("");
+      return;
+    }
+    const modelItems = await listModels(token, nextProvider);
+    setModels(modelItems);
+    setSelectedModel((current) =>
+      modelItems.some((model) => model.id === current) ? current : modelItems[0]?.id ?? ""
+    );
+  }, [provider, token]);
 
   useEffect(() => {
     let mounted = true;
@@ -113,7 +131,7 @@ export function useChat(token: string) {
 
   const sendMessage = useCallback(
     async (content: string) => {
-      if (!activeConversationId || isStreaming) return;
+      if (!activeConversationId || isStreaming || !providerConfigured || !selectedModel) return;
       setError(null);
       setIsStreaming(true);
       const now = new Date().toISOString();
@@ -142,6 +160,7 @@ export function useChat(token: string) {
           activeConversationId,
           content,
           selectedModel,
+          provider,
           (event) => {
             if (event.event === "content_delta") {
               setMessages((current) =>
@@ -175,7 +194,15 @@ export function useChat(token: string) {
         abortRef.current = null;
       }
     },
-    [activeConversationId, isStreaming, refreshConversations, selectedModel, token]
+    [
+      activeConversationId,
+      isStreaming,
+      provider,
+      providerConfigured,
+      refreshConversations,
+      selectedModel,
+      token,
+    ]
   );
 
   const stopStreaming = useCallback(() => {
@@ -194,6 +221,7 @@ export function useChat(token: string) {
     error,
     setActiveConversationId,
     setSelectedModel,
+    refreshModels,
     startConversation,
     removeConversation,
     updateTitle,

@@ -2,7 +2,9 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 ARG VITE_API_URL=http://localhost:8000
+ARG VITE_PROVIDER_BASE_URL=https://api.openai.com/v1
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_PROVIDER_BASE_URL=$VITE_PROVIDER_BASE_URL
 
 COPY package*.json ./
 RUN npm install

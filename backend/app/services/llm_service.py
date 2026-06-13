@@ -7,7 +7,7 @@ from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.provider import ProviderSettings
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.schemas.chat import ModelInfo
@@ -38,16 +38,34 @@ AVAILABLE_MODELS: list[ModelInfo] = [
 
 
 class LLMService:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, provider: ProviderSettings):
         self.db = db
         self.client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL,
+            api_key=provider.api_key,
+            base_url=provider.base_url,
         )
         self.conversation_service = ConversationService(db)
 
-    def get_models(self) -> list[ModelInfo]:
-        return AVAILABLE_MODELS
+    async def get_models(self) -> list[ModelInfo]:
+        try:
+            response = await self.client.models.list()
+        except Exception as exc:
+            logger.exception("Provider model list failed")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Could not load models from the configured AI provider",
+            ) from exc
+
+        models = sorted(response.data, key=lambda item: item.id)
+        return [
+            ModelInfo(
+                id=model.id,
+                name=model.id,
+                description="Available from configured provider",
+                context_window=0,
+            )
+            for model in models
+        ]
 
     async def _get_history(self, conversation_id: str) -> list[dict[str, str]]:
         result = await self.db.execute(
@@ -148,7 +166,13 @@ class LLMService:
             await self.db.rollback()
             yield self._format_sse(
                 "error",
-                {"message": "The AI provider could not complete the streamed request"},
+                {
+                    "message": (
+                        "Could not connect to the AI provider. If your provider runs on "
+                        "the host machine, use http://localhost:<port>/v1 in the app; "
+                        "Docker will route it through host.docker.internal."
+                    )
+                },
             )
 
     @staticmethod
