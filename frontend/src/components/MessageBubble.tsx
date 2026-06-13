@@ -32,7 +32,7 @@ export function MessageBubble({ message }: { message: Message }) {
       </div>
 
       <div className={clsx(
-        'max-w-[80%] rounded-2xl px-4 py-2.5 text-sm',
+        'max-w-[90%] rounded-2xl px-4 py-2.5 text-sm',
         isUser
           ? 'bg-blue-600 text-white rounded-tr-sm'
           : 'bg-zinc-800 text-zinc-100 rounded-tl-sm'

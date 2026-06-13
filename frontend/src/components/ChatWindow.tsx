@@ -35,7 +35,7 @@ export function ChatWindow({ conversation, isStreaming, streamingContent, error 
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto py-4">
+      <div className="py-4">
         {conversation?.messages.map((msg) => (
           <MessageBubble key={msg.id} message={msg} />
         ))}
@@ -45,7 +45,7 @@ export function ChatWindow({ conversation, isStreaming, streamingContent, error 
             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center text-white">
               <Bot size={15} />
             </div>
-            <div className="max-w-[80%] bg-zinc-800 text-zinc-100 rounded-2xl rounded-tl-sm px-4 py-2.5">
+            <div className="max-w-[90%] bg-zinc-800 text-zinc-100 rounded-2xl rounded-tl-sm px-4 py-2.5">
               <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-p:my-1">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
