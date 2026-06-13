@@ -4,7 +4,7 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
-
+.serena/
 node_modules/
 dist/
 .env.local
