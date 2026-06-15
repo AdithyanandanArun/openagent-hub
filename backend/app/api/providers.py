@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas.provider import ProviderCreate, ProviderUpdate, ProviderResponse, ProviderTestResult
 from app.services.auth_service import get_current_user
+from app.services.catalog_service import sync_provider_models
 from app.services.provider_service import (
     list_providers,
     create_provider,
@@ -14,6 +15,7 @@ from app.services.provider_service import (
     delete_provider,
     test_provider,
     fetch_provider_models,
+    get_provider,
 )
 
 router = APIRouter(prefix="/providers", tags=["providers"])
@@ -69,7 +71,12 @@ async def test_provider_route(
     db: Session = Depends(get_db),
 ):
     try:
-        return await test_provider(db, user.id, provider_id)
+        result = await test_provider(db, user.id, provider_id)
+        # Auto-sync models into catalog on successful test
+        if result.status == "healthy" and result.models:
+            provider = get_provider(db, user.id, provider_id)
+            sync_provider_models(db, user.id, provider, result.models)
+        return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

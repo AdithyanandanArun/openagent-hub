@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, conversations, chat, models, projects, attachments, providers
+from app.api import (
+    auth, conversations, chat, models, projects, attachments, providers, catalog,
+    memory, skills, mcp, agents,
+)
 
 app = FastAPI(title="OpenAgent Hub", version="0.1.0")
 
@@ -19,6 +22,11 @@ app.include_router(models.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(attachments.router, prefix="/api")
 app.include_router(providers.router, prefix="/api")
+app.include_router(catalog.router, prefix="/api")
+app.include_router(memory.router, prefix="/api")
+app.include_router(skills.router, prefix="/api")
+app.include_router(mcp.router, prefix="/api")
+app.include_router(agents.router, prefix="/api")
 
 
 @app.get("/health")

@@ -16,6 +16,7 @@ export function useChat() {
   const [currentConversation, setCurrentConversation] = useState<ConversationDetail | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingTools, setStreamingTools] = useState<{ tool: string; input?: any; output?: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -59,13 +60,20 @@ export function useChat() {
   );
 
   const sendMessage = useCallback(
-    async (message: string, model: string | null, attachmentIds?: string[], providerId?: string | null) => {
+    async (
+      message: string,
+      model: string | null,
+      attachmentIds?: string[],
+      providerId?: string | null,
+      opts?: { useTools?: boolean; toolMode?: 'off' | 'auto' | 'always'; skillId?: string | null },
+    ) => {
       const token = localStorage.getItem('token');
       if (!token) return;
 
       setError(null);
       setIsStreaming(true);
       setStreamingContent('');
+      setStreamingTools([]);
 
       const userMessage: Message = {
         id: crypto.randomUUID(),
@@ -105,6 +113,7 @@ export function useChat() {
         async () => {
           setIsStreaming(false);
           setStreamingContent('');
+          setStreamingTools([]);
           if (resolvedConvId) {
             const detail = await getConversation(resolvedConvId);
             setCurrentConversation(detail);
@@ -115,10 +124,27 @@ export function useChat() {
         (err) => {
           setIsStreaming(false);
           setStreamingContent('');
+          setStreamingTools([]);
           setError(err);
         },
         attachmentIds,
         providerId,
+        {
+          useTools: opts?.useTools,
+          toolMode: opts?.toolMode,
+          skillId: opts?.skillId,
+          onToolCall: (tool, input) => setStreamingTools((p) => [...p, { tool, input }]),
+          onToolResult: (tool, output) =>
+            setStreamingTools((p) => {
+              // attach the output to the most recent matching pending tool call
+              const idx = [...p].reverse().findIndex((t) => t.tool === tool && t.output === undefined);
+              if (idx === -1) return [...p, { tool, output }];
+              const realIdx = p.length - 1 - idx;
+              const next = [...p];
+              next[realIdx] = { ...next[realIdx], output };
+              return next;
+            }),
+        },
       );
 
       abortRef.current = controller;
@@ -130,6 +156,7 @@ export function useChat() {
     abortRef.current?.abort();
     setIsStreaming(false);
     setStreamingContent('');
+    setStreamingTools([]);
   }, []);
 
   const editMessage = useCallback(
@@ -169,6 +196,7 @@ export function useChat() {
     currentConversation,
     isStreaming,
     streamingContent,
+    streamingTools,
     error,
     loadConversations,
     selectConversation,

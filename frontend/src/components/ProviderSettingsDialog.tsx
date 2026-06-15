@@ -2,12 +2,16 @@ import { useState, useEffect } from 'react';
 import {
   X, RefreshCw, Save, Sun, Moon, LogOut, User as UserIcon, Cpu, Settings2,
   Plus, Trash2, Zap, CheckCircle, AlertCircle, Circle, ChevronUp, ChevronDown, Eye, EyeOff,
+  Brain, Sparkles, Terminal,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { ProviderConfig } from '../services/chat';
 import { Provider, ProviderTestResult } from '../services/providers';
 import { useTheme } from '../contexts/ThemeContext';
 import { useProviders } from '../hooks/useProviders';
+import { MemoryTab } from './settings/MemoryTab';
+import { SkillsTab } from './settings/SkillsTab';
+import { MCPTab } from './settings/MCPTab';
 
 interface Props {
   config: ProviderConfig | null;
@@ -20,11 +24,14 @@ interface Props {
   onProvidersChange?: () => void;
 }
 
-type Tab = 'general' | 'providers' | 'api' | 'account';
+type Tab = 'general' | 'providers' | 'memory' | 'skills' | 'mcp' | 'api' | 'account';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'general', label: 'General', icon: <Settings2 size={15} /> },
   { id: 'providers', label: 'Providers', icon: <Cpu size={15} /> },
+  { id: 'memory', label: 'Memory', icon: <Brain size={15} /> },
+  { id: 'skills', label: 'Skills', icon: <Sparkles size={15} /> },
+  { id: 'mcp', label: 'MCP', icon: <Terminal size={15} /> },
   { id: 'api', label: 'Single API', icon: <Zap size={15} /> },
   { id: 'account', label: 'Account', icon: <UserIcon size={15} /> },
 ];
@@ -403,6 +410,9 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
           <div className="flex-1 overflow-y-auto px-6 py-5">
             {activeTab === 'general' && <GeneralTab />}
             {activeTab === 'providers' && <ProvidersTab onProvidersChange={onProvidersChange} />}
+            {activeTab === 'memory' && <MemoryTab />}
+            {activeTab === 'skills' && <SkillsTab />}
+            {activeTab === 'mcp' && <MCPTab />}
             {activeTab === 'api' && <ApiTab config={config} onSave={onSave} onFetchModels={onFetchModels} />}
             {activeTab === 'account' && <AccountTab username={username} email={email} onLogout={onLogout} />}
           </div>

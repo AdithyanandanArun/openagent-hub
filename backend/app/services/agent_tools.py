@@ -1,0 +1,315 @@
+"""
+Tool registry for the agent runtime.
+
+A *tool* is an OpenAI-compatible function schema plus an async handler. Tools come
+from three sources:
+
+  1. Built-ins        — safe, self-contained (calculate, current_time, memory R/W)
+  2. MCP servers      — discovered dynamically from the user's enabled MCP servers
+  3. spawn_agent      — only for coordinator agents (multi-agent), injected by the runtime
+
+Handlers are async `(ctx: ToolContext, args: dict) -> str`. DB-touching handlers open
+their own session via `ctx.session_factory` so a turn's tool calls can run concurrently.
+"""
+import ast
+import json
+import operator
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Awaitable, Callable, Optional
+from uuid import UUID
+
+from app.core.mcp_client import mcp_call_tool, MCPError
+from app.models.mcp_server import MCPServer
+from app.services import memory_service
+
+ToolHandler = Callable[["ToolContext", dict], Awaitable[str]]
+
+
+@dataclass
+class ToolContext:
+    session_factory: Any
+    user_id: UUID
+    conversation_id: Optional[UUID] = None
+    project_id: Optional[UUID] = None
+    allow_subagents: bool = False
+    depth: int = 0
+    spawn_fn: Optional[Callable[[str, str], Awaitable[str]]] = None
+
+
+@dataclass
+class ToolDef:
+    name: str
+    description: str
+    parameters: dict
+    handler: ToolHandler
+
+    def to_openai(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            },
+        }
+
+
+# --------------------------------------------------------------------------- #
+# Safe arithmetic evaluator (for `calculate`)                                  #
+# --------------------------------------------------------------------------- #
+
+_ALLOWED_OPS = {
+    ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+    ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod,
+    ast.Pow: operator.pow, ast.USub: operator.neg, ast.UAdd: operator.pos,
+}
+
+
+def _safe_eval(node: ast.AST) -> float:
+    if isinstance(node, ast.Expression):
+        return _safe_eval(node.body)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return node.value
+        raise ValueError("only numeric constants allowed")
+    if isinstance(node, ast.BinOp) and type(node.op) in _ALLOWED_OPS:
+        return _ALLOWED_OPS[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _ALLOWED_OPS:
+        return _ALLOWED_OPS[type(node.op)](_safe_eval(node.operand))
+    raise ValueError("unsupported expression")
+
+
+# --------------------------------------------------------------------------- #
+# Built-in tool handlers                                                       #
+# --------------------------------------------------------------------------- #
+
+async def _h_calculate(ctx: ToolContext, args: dict) -> str:
+    expr = str(args.get("expression", "")).strip()
+    if not expr:
+        return "Error: expression is required."
+    try:
+        result = _safe_eval(ast.parse(expr, mode="eval"))
+        return f"{expr} = {result}"
+    except Exception as exc:  # noqa: BLE001
+        return f"Error evaluating '{expr}': {exc}"
+
+
+async def _h_current_time(ctx: ToolContext, args: dict) -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _h_remember(ctx: ToolContext, args: dict) -> str:
+    content = str(args.get("content", "")).strip()
+    if not content:
+        return "Error: content is required."
+    scope = str(args.get("scope", "user"))
+    if scope not in memory_service.VALID_SCOPES:
+        scope = "user"
+    with ctx.session_factory() as db:
+        try:
+            memory_service.create_memory(
+                db,
+                ctx.user_id,
+                content,
+                scope=scope if scope == "user" else ("conversation" if ctx.conversation_id else "user"),
+                conversation_id=ctx.conversation_id,
+                project_id=ctx.project_id,
+                source="agent",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return f"Error saving memory: {exc}"
+    return f"Saved to {scope} memory: {content}"
+
+
+async def _h_recall(ctx: ToolContext, args: dict) -> str:
+    query = str(args.get("query", "")).strip()
+    with ctx.session_factory() as db:
+        results = memory_service.search_memories(db, ctx.user_id, query, limit=10)
+        if results:
+            return "\n".join(f"- [{m.scope}] {m.content}" for m in results)
+        # Fall back to recent memories so the agent still has context to reason over.
+        recent = memory_service.list_memories(db, ctx.user_id)[:10]
+    if not recent:
+        return "No memories stored yet."
+    listed = "\n".join(f"- [{m.scope}] {m.content}" for m in recent)
+    return f"No direct keyword match for '{query}'. Most recent memories:\n{listed}"
+
+
+BUILTIN_TOOLS: dict[str, ToolDef] = {
+    "calculate": ToolDef(
+        name="calculate",
+        description="Evaluate a basic arithmetic expression (e.g. '2 * (3 + 4)'). Use for any math.",
+        parameters={
+            "type": "object",
+            "properties": {"expression": {"type": "string", "description": "Arithmetic expression"}},
+            "required": ["expression"],
+        },
+        handler=_h_calculate,
+    ),
+    "current_time": ToolDef(
+        name="current_time",
+        description="Get the current date and time in UTC (ISO-8601).",
+        parameters={"type": "object", "properties": {}},
+        handler=_h_current_time,
+    ),
+    "remember": ToolDef(
+        name="remember",
+        description="Save an important fact to persistent memory so it is available in future conversations.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "The fact to remember"},
+                "scope": {"type": "string", "enum": ["user", "conversation"], "default": "user"},
+            },
+            "required": ["content"],
+        },
+        handler=_h_remember,
+    ),
+    "recall": ToolDef(
+        name="recall",
+        description="Search the user's saved memories for relevant facts.",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "What to search for"}},
+            "required": ["query"],
+        },
+        handler=_h_recall,
+    ),
+}
+
+
+# --------------------------------------------------------------------------- #
+# MCP tools                                                                    #
+# --------------------------------------------------------------------------- #
+
+def _make_mcp_handler(server: MCPServer, tool_name: str) -> ToolHandler:
+    command = server.command
+    args = list(server.args or [])
+    env = dict(server.env or {})
+    auto_approve = server.auto_approve
+
+    async def handler(ctx: ToolContext, call_args: dict) -> str:
+        if not auto_approve:
+            return (
+                f"[blocked] The MCP server '{server.name}' requires manual approval for its tools. "
+                "Enable auto-approve in MCP settings to allow this call."
+            )
+        try:
+            return await mcp_call_tool(command, tool_name, call_args, args=args, env=env)
+        except MCPError as exc:
+            return f"[mcp error] {exc}"
+        except Exception as exc:  # noqa: BLE001
+            return f"[mcp error] {exc}"
+
+    return handler
+
+
+def _mcp_tool_name(server_name: str, tool_name: str) -> str:
+    """Namespace MCP tools to avoid collisions: mcp__<server>__<tool>."""
+    safe_server = "".join(c if c.isalnum() else "_" for c in server_name)[:24]
+    safe_tool = "".join(c if (c.isalnum() or c == "_") else "_" for c in tool_name)
+    return f"mcp__{safe_server}__{safe_tool}"
+
+
+def get_mcp_tools(db, user_id: UUID) -> dict[str, ToolDef]:
+    """Build ToolDefs from the user's enabled MCP servers, using each server's cached tool list."""
+    servers = (
+        db.query(MCPServer)
+        .filter(MCPServer.user_id == user_id, MCPServer.enabled == True)
+        .all()
+    )
+    tools: dict[str, ToolDef] = {}
+    for server in servers:
+        for tool in server.tools_cache or []:
+            raw_name = tool.get("name")
+            if not raw_name:
+                continue
+            namespaced = _mcp_tool_name(server.name, raw_name)
+            description = tool.get("description") or f"{raw_name} (via {server.name})"
+            parameters = tool.get("inputSchema") or {"type": "object", "properties": {}}
+            tools[namespaced] = ToolDef(
+                name=namespaced,
+                description=description[:1000],
+                parameters=parameters,
+                handler=_make_mcp_handler(server, raw_name),
+            )
+    return tools
+
+
+# --------------------------------------------------------------------------- #
+# spawn_agent (multi-agent)                                                    #
+# --------------------------------------------------------------------------- #
+
+def _spawn_tool() -> ToolDef:
+    async def handler(ctx: ToolContext, args: dict) -> str:
+        if not ctx.spawn_fn:
+            return "Error: sub-agents are not enabled for this run."
+        role = str(args.get("role", "Worker")).strip() or "Worker"
+        goal = str(args.get("goal", "")).strip()
+        if not goal:
+            return "Error: goal is required to spawn a sub-agent."
+        return await ctx.spawn_fn(role, goal)
+
+    return ToolDef(
+        name="spawn_agent",
+        description=(
+            "Delegate a focused subtask to a specialised sub-agent and get its result back. "
+            "Use this to parallelise independent pieces of work (research, coding, analysis). "
+            "Provide a clear role and a self-contained goal."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "description": "Role/name for the sub-agent, e.g. 'Research Agent'"},
+                "goal": {"type": "string", "description": "A self-contained task for the sub-agent to complete"},
+            },
+            "required": ["role", "goal"],
+        },
+        handler=handler,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Registry assembly                                                            #
+# --------------------------------------------------------------------------- #
+
+def build_registry(
+    db,
+    user_id: UUID,
+    allow_subagents: bool = False,
+    allowed_tool_names: list[str] | None = None,
+) -> dict[str, ToolDef]:
+    """Assemble the full tool registry for a run.
+
+    `allowed_tool_names` (from a skill) optionally restricts the built-in/MCP tools;
+    spawn_agent is governed solely by `allow_subagents`."""
+    registry: dict[str, ToolDef] = {}
+    registry.update(BUILTIN_TOOLS)
+    registry.update(get_mcp_tools(db, user_id))
+
+    if allowed_tool_names:
+        allowed = set(allowed_tool_names)
+        registry = {k: v for k, v in registry.items() if k in allowed}
+
+    if allow_subagents:
+        spawn = _spawn_tool()
+        registry[spawn.name] = spawn
+
+    return registry
+
+
+def to_openai_tools(registry: dict[str, ToolDef]) -> list[dict]:
+    return [t.to_openai() for t in registry.values()]
+
+
+def parse_tool_arguments(raw: Any) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}

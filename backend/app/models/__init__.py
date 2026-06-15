@@ -5,3 +5,10 @@ from app.models.message import Message
 from app.models.attachment import Attachment
 from app.models.provider_config import ProviderConfig
 from app.models.provider import Provider
+from app.models.model_catalog import ModelCatalog
+from app.models.memory import Memory
+from app.models.skill import Skill
+from app.models.agent import Agent
+from app.models.agent_run import AgentRun
+from app.models.agent_step import AgentStep
+from app.models.mcp_server import MCPServer

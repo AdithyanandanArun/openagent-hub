@@ -9,6 +9,9 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None
     provider_id: Optional[UUID] = None
     attachment_ids: Optional[List[UUID]] = None
+    use_tools: bool = False
+    tool_mode: Optional[str] = None  # "off" | "auto" | "always"; falls back to use_tools
+    skill_id: Optional[UUID] = None
 
 
 class ProviderConfigRequest(BaseModel):

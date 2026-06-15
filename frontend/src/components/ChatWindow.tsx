@@ -6,20 +6,61 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { Wrench, Terminal, CheckCircle2 } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { ConversationDetail } from '../services/chat';
+
+interface ToolActivity {
+  tool: string;
+  input?: any;
+  output?: string;
+}
 
 interface Props {
   conversation: ConversationDetail | null;
   isStreaming: boolean;
   streamingContent: string;
+  streamingTools?: ToolActivity[];
   thinkingLabel?: string;
   error: string | null;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onRegenerate?: () => void;
 }
 
-export function ChatWindow({ conversation, isStreaming, streamingContent, thinkingLabel = 'Thinking', error, onEditMessage, onRegenerate }: Props) {
+function prettyTool(tool: string) {
+  if (tool.startsWith('mcp__')) {
+    const parts = tool.split('__');
+    return `${parts[2] ?? tool} · ${parts[1] ?? 'mcp'}`;
+  }
+  return tool;
+}
+
+function ToolActivityStrip({ tools }: { tools: ToolActivity[] }) {
+  if (tools.length === 0) return null;
+  return (
+    <div className="px-4 pb-1">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 space-y-1">
+        {tools.map((t, i) => {
+          const isMcp = t.tool.startsWith('mcp__');
+          return (
+            <div key={i} className="flex items-center gap-2 text-xs">
+              {isMcp ? <Terminal size={12} className="text-cyan-400 flex-shrink-0" />
+                     : <Wrench size={12} className="text-amber-400 flex-shrink-0" />}
+              <span className="text-zinc-400">Used</span>
+              <span className="font-medium text-zinc-300">{prettyTool(t.tool)}</span>
+              {t.output !== undefined && <CheckCircle2 size={11} className="text-emerald-500/70 flex-shrink-0" />}
+              {t.output !== undefined && (
+                <span className="text-zinc-600 truncate max-w-[280px]">{t.output.replace(/\n/g, ' ').slice(0, 80)}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function ChatWindow({ conversation, isStreaming, streamingContent, streamingTools = [], thinkingLabel = 'Thinking', error, onEditMessage, onRegenerate }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true); // true = auto-scroll to bottom
@@ -97,6 +138,8 @@ export function ChatWindow({ conversation, isStreaming, streamingContent, thinki
           );
         })}
 
+        {isStreaming && <ToolActivityStrip tools={streamingTools} />}
+
         {isStreaming && streamingContent && (
           <div className="px-4 py-3">
             <div className="prose prose-invert max-w-none
@@ -139,7 +182,7 @@ export function ChatWindow({ conversation, isStreaming, streamingContent, thinki
           </div>
         )}
 
-        {isStreaming && !streamingContent && (
+        {isStreaming && !streamingContent && streamingTools.length === 0 && (
           <div className="px-4 py-3 flex items-center gap-2">
             <span className="text-sm text-zinc-400 animate-pulse">{thinkingLabel}</span>
             <span className="flex gap-0.5 items-center">

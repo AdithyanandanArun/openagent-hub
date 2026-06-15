@@ -43,6 +43,48 @@ async def stream_chat(
                         continue
 
 
+async def chat_completion(
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    temperature: float = 0.4,
+    timeout: float = 120.0,
+) -> dict:
+    """Non-streaming chat completion. Returns the assistant message dict
+    (which may contain `content` and/or `tool_calls`). Used by the agent runtime."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "temperature": temperature,
+    }
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{base_url}/chat/completions",
+            headers=headers,
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        choices = data.get("choices")
+        if not choices:
+            raise RuntimeError(f"Provider returned no choices: {str(data)[:300]}")
+        message = choices[0].get("message")
+        if message is None:
+            raise RuntimeError(f"Provider response missing message: {str(data)[:300]}")
+        return message
+
+
 async def fetch_models(base_url: str, api_key: str) -> list[str]:
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(timeout=30.0) as client:

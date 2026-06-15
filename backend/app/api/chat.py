@@ -17,6 +17,7 @@ from app.services.conversation_service import (
     auto_title_conversation,
 )
 from app.services.llm_service import get_provider_config
+from app.services.memory_service import build_memory_context
 from app.models.attachment import Attachment
 from app.schemas.conversation import ConversationCreate
 from app.schemas.chat import ChatRequest
@@ -34,7 +35,17 @@ async def chat_stream(
     user = get_current_user(db, credentials.credentials)
     provider = get_provider_config(db, user.id)
 
-    if not provider.base_url or not provider.model:
+    # Two ways to chat: multi-provider routing (Phase 3+) or a single-provider config.
+    # Routing only needs a model (from the request); the single config needs base_url + model.
+    using_router = has_enabled_providers(db, user.id)
+    effective_model = request.model or provider.model
+    if using_router:
+        if not effective_model:
+            raise HTTPException(
+                status_code=400,
+                detail="No model selected. Pick a model from the model picker.",
+            )
+    elif not provider.base_url or not effective_model:
         raise HTTPException(
             status_code=400,
             detail="Provider not configured. Open Settings to set your API key and model.",
@@ -43,7 +54,7 @@ async def chat_stream(
     if request.conversation_id:
         conv = get_conversation(db, request.conversation_id, user.id)
     else:
-        conv = create_conversation(db, user.id, ConversationCreate(model=request.model or provider.model))
+        conv = create_conversation(db, user.id, ConversationCreate(model=effective_model))
 
     # Build message content (prepend attachment text if any)
     user_content = request.message
@@ -108,6 +119,22 @@ async def chat_stream(
         "Your output will be rendered as Markdown, so raw `#` and `-` characters will become visual headings and bullet points. Use them."
     )
 
+    # Inject the user's persistent memory (user + project + conversation scopes).
+    memory_context = build_memory_context(db, user.id, conversation_id=conv.id)
+    if memory_context:
+        system_prompt = f"{system_prompt}\n\n{memory_context}"
+
+    # Optional skill: prepend its instructions and capture any tool restriction.
+    allowed_tool_names = None
+    if request.skill_id:
+        from app.services.skill_service import get_skill
+        try:
+            skill = get_skill(db, user.id, request.skill_id)
+            system_prompt = f"{system_prompt}\n\n## Skill: {skill.name}\n{skill.instructions}"
+            allowed_tool_names = skill.tool_names or None
+        except Exception:
+            pass
+
     messages = [{"role": "system", "content": system_prompt}]
     messages += [{"role": m.role, "content": m.content} for m in conv.messages]
     # user_content already added to DB; use it as the last message content
@@ -122,21 +149,43 @@ async def chat_stream(
     user_id: UUID = user.id
     preferred_provider_id = str(request.provider_id) if request.provider_id else None
     use_router = has_enabled_providers(db, user.id)
+    # Resolve tool behaviour. Explicit tool_mode wins; otherwise fall back to the
+    # legacy use_tools flag (True -> "auto"). Tools are active unless mode is "off".
+    tool_mode = (request.tool_mode or ("auto" if request.use_tools else "off")).lower()
+    if tool_mode not in ("off", "auto", "always"):
+        tool_mode = "auto"
+    use_tools = tool_mode != "off"
 
     async def generate():
         full_response = ""
         try:
             yield f"data: {json.dumps({'type': 'conversation_id', 'conversation_id': str(conv_id)})}\n\n"
 
-            with SessionLocal() as stream_db:
-                if use_router:
-                    chunks = route_chat(stream_db, user_id, model, messages, preferred_provider_id)
-                else:
-                    chunks = stream_chat(base_url=base_url, api_key=api_key, model=model, messages=messages)
+            if use_tools:
+                from app.services.chat_agent_service import stream_chat_with_tools
+                async for evt in stream_chat_with_tools(
+                    user_id=user_id,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                    preferred_provider_id=preferred_provider_id,
+                    allowed_tool_names=allowed_tool_names,
+                    tool_mode=tool_mode,
+                ):
+                    if evt.get("type") == "chunk":
+                        full_response += evt["content"]
+                    yield f"data: {json.dumps(evt)}\n\n"
+            else:
+                with SessionLocal() as stream_db:
+                    if use_router:
+                        chunks = route_chat(stream_db, user_id, model, messages, preferred_provider_id)
+                    else:
+                        chunks = stream_chat(base_url=base_url, api_key=api_key, model=model, messages=messages)
 
-                async for chunk in chunks:
-                    full_response += chunk
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                    async for chunk in chunks:
+                        full_response += chunk
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
 
             with SessionLocal() as fresh_db:
                 add_message(fresh_db, conv_id, "assistant", full_response)

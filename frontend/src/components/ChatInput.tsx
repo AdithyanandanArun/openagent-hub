@@ -1,17 +1,21 @@
 import { useState, useRef, KeyboardEvent } from 'react';
-import { Send, Square, Paperclip, X, FileText, Image, ChevronDown } from 'lucide-react';
+import { Send, Square, Paperclip, X, FileText, Image, ChevronDown, Eye, Brain, Zap, Wrench, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 import { uploadAttachment, AttachmentMeta } from '../services/attachments';
 import { ProviderModel } from '../hooks/useProviders';
+import { CatalogModel } from '../services/catalog';
+import { Skill } from '../services/skills';
 
 interface Props {
-  onSend: (message: string, attachmentIds: string[]) => void;
+  onSend: (message: string, attachmentIds: string[], opts: { toolMode: 'off' | 'auto' | 'always'; skillId: string | null }) => void;
   onStop: () => void;
   isStreaming: boolean;
   disabled?: boolean;
   model: string;
   availableModels: string[];
   providerModels?: ProviderModel[];
+  catalog?: CatalogModel[];
+  skills?: Skill[];
   onModelChange: (model: string, providerId?: string | null) => void;
 }
 
@@ -28,15 +32,38 @@ function FileChip({ att, onRemove }: { att: AttachmentMeta; onRemove: () => void
   );
 }
 
+function CapabilityBadges({ entry }: { entry: CatalogModel }) {
+  return (
+    <span className="flex items-center gap-1 ml-1 flex-shrink-0">
+      {entry.vision_support && (
+        <span title="Vision" className="text-blue-400"><Eye size={9} /></span>
+      )}
+      {entry.reasoning_support && (
+        <span title="Reasoning" className="text-purple-400"><Brain size={9} /></span>
+      )}
+      {entry.speed_score !== null && entry.speed_score >= 8 && (
+        <span title="Fast" className="text-yellow-400"><Zap size={9} /></span>
+      )}
+      {entry.context_window !== null && entry.context_window >= 100_000 && (
+        <span className="text-[9px] text-emerald-400 font-medium leading-none">
+          {entry.context_window >= 1_000_000 ? '1M' : `${Math.round(entry.context_window / 1000)}k`}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function ModelPicker({
   model,
   availableModels,
   providerModels,
+  catalog,
   onChange,
 }: {
   model: string;
   availableModels: string[];
   providerModels?: ProviderModel[];
+  catalog?: CatalogModel[];
   onChange: (m: string, providerId?: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -85,14 +112,18 @@ function ModelPicker({
                 {groups.map((g) => (
                   <div key={g.provider_id}>
                     <p className="px-3 pt-2 pb-1 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{g.provider_name}</p>
-                    {g.models.map((m) => (
-                      <button key={`${g.provider_id}:${m}`} type="button"
-                        onMouseDown={(e) => { e.preventDefault(); onChange(m, g.provider_id); setOpen(false); }}
-                        className={clsx('w-full text-left px-3 py-1.5 text-sm transition-colors truncate pl-4',
-                          m === model ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}>
-                        {m}
-                      </button>
-                    ))}
+                    {g.models.map((m) => {
+                      const meta = catalog?.find((c) => c.provider_id === g.provider_id && c.model_id === m);
+                      return (
+                        <button key={`${g.provider_id}:${m}`} type="button"
+                          onMouseDown={(e) => { e.preventDefault(); onChange(m, g.provider_id); setOpen(false); }}
+                          className={clsx('w-full text-left px-3 py-1.5 text-sm transition-colors pl-4 flex items-center gap-1',
+                            m === model ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}>
+                          <span className="truncate flex-1">{m}</span>
+                          {meta && <CapabilityBadges entry={meta} />}
+                        </button>
+                      );
+                    })}
                   </div>
                 ))}
               </div>
@@ -101,7 +132,7 @@ function ModelPicker({
                 {flatModels.map((m) => (
                   <button key={m} type="button"
                     onMouseDown={(e) => { e.preventDefault(); onChange(m, null); setOpen(false); }}
-                    className={clsx('w-full text-left px-3 py-2 text-sm transition-colors truncate',
+                    className={clsx('w-full text-left px-3 py-2 text-sm transition-colors',
                       m === model ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}>
                     {m}
                   </button>
@@ -115,10 +146,16 @@ function ModelPicker({
   );
 }
 
-export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availableModels, providerModels, onModelChange }: Props) {
+export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availableModels, providerModels, catalog, skills, onModelChange }: Props) {
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [uploading, setUploading] = useState(false);
+  // Tools default to "auto": the model calls tools when it judges them helpful,
+  // without the user having to opt in each message.
+  const [toolMode, setToolMode] = useState<'off' | 'auto' | 'always'>('auto');
+  const [toolOpen, setToolOpen] = useState(false);
+  const [skillId, setSkillId] = useState<string>('');
+  const [skillOpen, setSkillOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -129,8 +166,10 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
     setValue('');
     setAttachments([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    onSend(msg || '(see attachment)', ids);
+    onSend(msg || '(see attachment)', ids, { toolMode, skillId: skillId || null });
   };
+
+  const activeSkill = skills?.find((s) => s.id === skillId);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -204,7 +243,80 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
             >
               <Paperclip size={15} className={uploading ? 'animate-pulse' : ''} />
             </button>
-            <ModelPicker model={model} availableModels={availableModels} providerModels={providerModels} onChange={onModelChange} />
+            <ModelPicker model={model} availableModels={availableModels} providerModels={providerModels} catalog={catalog} onChange={onModelChange} />
+
+            {/* Tools mode picker: Off / Auto / Always */}
+            <div className="relative">
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); setToolOpen((o) => !o); }}
+                title="Control whether the assistant can use tools (MCP servers + built-ins)"
+                className={clsx('flex items-center gap-1 text-xs rounded-md px-1.5 py-1 transition-colors',
+                  toolMode === 'off' ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700' : 'bg-amber-950/40 text-amber-300')}
+              >
+                <Wrench size={12} />
+                Tools{toolMode === 'off' ? '' : toolMode === 'auto' ? ': Auto' : ': Always'}
+              </button>
+              {toolOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setToolOpen(false)} />
+                  <div className="absolute bottom-full left-0 mb-1 w-52 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 py-1">
+                    {([
+                      { v: 'auto', label: 'Auto', desc: 'Use tools when helpful' },
+                      { v: 'always', label: 'Always', desc: 'Force a tool call first' },
+                      { v: 'off', label: 'Off', desc: 'Never use tools' },
+                    ] as const).map((o) => (
+                      <button
+                        key={o.v}
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); setToolMode(o.v); setToolOpen(false); }}
+                        className={clsx('w-full text-left px-3 py-1.5 text-sm flex flex-col',
+                          toolMode === o.v ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}
+                      >
+                        <span className="font-medium">{o.label}</span>
+                        <span className="text-[10px] text-zinc-500">{o.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Skill picker */}
+            {skills && skills.length > 0 && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); setSkillOpen((o) => !o); }}
+                  title="Apply a skill"
+                  className={clsx('flex items-center gap-1 text-xs rounded-md px-1.5 py-1 transition-colors',
+                    activeSkill ? 'bg-purple-950/40 text-purple-300' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700')}
+                >
+                  <Sparkles size={12} />
+                  <span className="max-w-[110px] truncate">{activeSkill ? activeSkill.name : 'Skill'}</span>
+                </button>
+                {skillOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setSkillOpen(false)} />
+                    <div className="absolute bottom-full left-0 mb-1 w-56 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 max-h-64 overflow-y-auto py-1">
+                      <button type="button" onMouseDown={(e) => { e.preventDefault(); setSkillId(''); setSkillOpen(false); }}
+                        className={clsx('w-full text-left px-3 py-1.5 text-sm', !skillId ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}>
+                        No skill
+                      </button>
+                      {skills.map((s) => (
+                        <button key={s.id} type="button"
+                          onMouseDown={(e) => { e.preventDefault(); setSkillId(s.id); setSkillOpen(false); }}
+                          className={clsx('w-full text-left px-3 py-1.5 text-sm flex items-center gap-1.5',
+                            s.id === skillId ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}>
+                          <Sparkles size={11} className="text-purple-400 flex-shrink-0" />
+                          <span className="truncate">{s.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           <button

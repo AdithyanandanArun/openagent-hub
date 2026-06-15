@@ -87,6 +87,13 @@ export function streamChat(
   onError: (error: string) => void,
   attachmentIds?: string[],
   providerId?: string | null,
+  options?: {
+    useTools?: boolean;
+    toolMode?: 'off' | 'auto' | 'always';
+    skillId?: string | null;
+    onToolCall?: (tool: string, input: any) => void;
+    onToolResult?: (tool: string, output: string) => void;
+  },
 ): AbortController {
   const controller = new AbortController();
 
@@ -96,7 +103,16 @@ export function streamChat(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ message, conversation_id: conversationId, model, attachment_ids: attachmentIds, provider_id: providerId ?? null }),
+    body: JSON.stringify({
+      message,
+      conversation_id: conversationId,
+      model,
+      attachment_ids: attachmentIds,
+      provider_id: providerId ?? null,
+      use_tools: options?.useTools ?? false,
+      tool_mode: options?.toolMode ?? null,
+      skill_id: options?.skillId ?? null,
+    }),
     signal: controller.signal,
   })
     .then(async (response) => {
@@ -124,6 +140,8 @@ export function streamChat(
             const evt = JSON.parse(line.slice(6));
             if (evt.type === 'chunk') onChunk(evt.content);
             else if (evt.type === 'conversation_id') onConversationId(evt.conversation_id);
+            else if (evt.type === 'tool_call') options?.onToolCall?.(evt.tool, evt.input);
+            else if (evt.type === 'tool_result') options?.onToolResult?.(evt.tool, evt.output);
             else if (evt.type === 'done') onDone();
             else if (evt.type === 'error') onError(evt.message);
           } catch {
