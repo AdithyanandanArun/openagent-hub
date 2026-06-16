@@ -1,27 +1,46 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Bot, Users, Send, Square, History, ChevronDown, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Bot, Users, Send, Square, ChevronDown, Target, ClipboardList, Zap, Eraser, X, CornerDownRight } from 'lucide-react';
 import clsx from 'clsx';
-import { useAgents } from '../hooks/useAgents';
-import { useSkills } from '../hooks/useSkills';
-import { useAgentTools } from '../hooks/useAgentTools';
-import { getRun, AgentRunDetail } from '../services/agents';
+import { AgentRunDetail, Agent, AgentMode, AgentTool, RunAgentParams, ContinueRunParams } from '../services/agents';
+import { Skill } from '../services/skills';
 import { ProviderModel } from '../hooks/useProviders';
 import { CatalogModel } from '../services/catalog';
+import { LiveStep } from '../hooks/useAgents';
 import { StepTimeline } from './StepTimeline';
-import { MarkdownContent } from './MarkdownContent';
 import { ToolPicker, ToolMode } from './ToolPicker';
 import { SkillPicker } from './SkillPicker';
-import { LiveStep } from '../hooks/useAgents';
+import { ModePicker } from './ModePicker';
+import { SlashCommandMenu, SlashCommand, SlashMenuHandle } from './SlashCommandMenu';
 
 interface Props {
   providerModels: ProviderModel[];
   fallbackModel: string;
   catalog?: CatalogModel[];
   availableModels?: string[];
+  skills: Skill[];
+  tools: AgentTool[];
+  // Run control (lifted to ChatPage so the sidebar and view share one source).
+  liveSteps: LiveStep[];
+  isRunning: boolean;
+  runError: string | null;
+  currentRunId: string | null;
+  start: (params: RunAgentParams) => void;
+  stop: () => void;
+  continueRun: (runId: string, params: ContinueRunParams) => void;
+  primeFromRun: (run: AgentRunDetail) => void;
+  // Viewing a past run (selected from the sidebar).
+  viewing: AgentRunDetail | null;
+  onClearViewing: () => void;
+  // Saved agents.
+  savedAgents: Agent[];
+  selectedAgentId: string | null;
+  onSelectedAgentChange: (id: string | null) => void;
+  onOpenManager: () => void;
+  // Prefill from a chat-tab slash command (/goal, /plan).
+  prefill: { goal?: string; mode?: AgentMode } | null;
+  onPrefillConsumed: () => void;
 }
 
-// Models agents need tool-calling. Prefer known tool-capable families and avoid
-// variants that don't support tools (search/audio/realtime/image/embeddings…).
 const PREFER_MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1', 'claude-3-5-sonnet', 'claude-3-5-haiku', 'claude', 'gemini-2.0-flash', 'gemini', 'llama-3.3-70b', 'qwen-2.5', 'mistral'];
 const EXCLUDE_FRAGMENTS = ['search', 'audio', 'realtime', 'tts', 'whisper', 'image', 'dall-e', 'embedding', 'moderation', 'vision-preview'];
 
@@ -33,17 +52,14 @@ function modelName(id: string): string {
 function pickDefaultModel(models: ProviderModel[]): { model: string; providerId: string | null } {
   const usable = models.filter((m) => !EXCLUDE_FRAGMENTS.some((f) => modelName(m.model).includes(f)));
   const pool = usable.length ? usable : models;
-  // 1. exact name match against preferred list
   for (const frag of PREFER_MODELS) {
     const hit = pool.find((m) => modelName(m.model) === frag);
     if (hit) return { model: hit.model, providerId: hit.provider_id };
   }
-  // 2. substring match against preferred list
   for (const frag of PREFER_MODELS) {
     const hit = pool.find((m) => modelName(m.model).includes(frag));
     if (hit) return { model: hit.model, providerId: hit.provider_id };
   }
-  // 3. fall back to first usable model
   return { model: pool[0].model, providerId: pool[0].provider_id };
 }
 
@@ -54,16 +70,13 @@ function statusColor(status: string) {
   return 'text-zinc-500';
 }
 
-export function AgentsView({ providerModels, fallbackModel, catalog, availableModels }: Props) {
-  const { runs, liveSteps, isRunning, runError, finalAnswer, start, stop, loadRuns, removeRun, clearAllRuns } = useAgents();
-  const { skills } = useSkills();
-  const { tools } = useAgentTools();
-
-  // Resolve the model list through the SAME fallback chain chat uses, so the
-  // picker is never empty when a model is configured anywhere:
-  //   live provider models → DB catalog → single-config models → the one
-  //   selected/configured model (covers users on the single-provider config
-  //   whose multi-providers are disabled and whose catalog is therefore empty).
+export function AgentsView({
+  providerModels, fallbackModel, catalog, availableModels, skills, tools,
+  liveSteps, isRunning, runError, currentRunId, start, stop, continueRun, primeFromRun,
+  viewing, onClearViewing,
+  savedAgents, selectedAgentId, onSelectedAgentChange, onOpenManager,
+  prefill, onPrefillConsumed,
+}: Props) {
   const effectiveModels: ProviderModel[] = useMemo(() => {
     if (providerModels.length > 0) return providerModels;
     if (catalog && catalog.length > 0) {
@@ -81,23 +94,37 @@ export function AgentsView({ providerModels, fallbackModel, catalog, availableMo
   }, [providerModels, catalog, availableModels, fallbackModel]);
 
   const [goal, setGoal] = useState('');
+  const [mode, setMode] = useState<AgentMode>('auto');
   const [skillId, setSkillId] = useState<string>('auto');
   const [toolMode, setToolMode] = useState<ToolMode>('auto');
   const [toolNames, setToolNames] = useState<string[]>([]);
   const [allowSub, setAllowSub] = useState(false);
-  const [selected, setSelected] = useState<{ model: string; providerId: string | null }>({
-    model: fallbackModel,
-    providerId: null,
-  });
+  const [teamIds, setTeamIds] = useState<string[]>([]);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [selected, setSelected] = useState<{ model: string; providerId: string | null }>({ model: fallbackModel, providerId: null });
   const [modelOpen, setModelOpen] = useState(false);
-  const [viewing, setViewing] = useState<AgentRunDetail | null>(null);
-  const [showHistory, setShowHistory] = useState(true);
+  const [followup, setFollowup] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const slashRef = useRef<SlashMenuHandle>(null);
+
+  const selectedAgent = savedAgents.find((a) => a.id === selectedAgentId) ?? null;
+  // Agents that can be delegated to (everything except the active coordinator).
+  const teamCandidates = savedAgents.filter((a) => a.id !== selectedAgentId);
+  // Multi-agent affordances appear when the toggle is on or the coordinator allows sub-agents.
+  const teamEnabled = allowSub || !!selectedAgent?.allow_subagents;
 
   useEffect(() => {
-    if (!selected.model && effectiveModels.length > 0) {
-      setSelected(pickDefaultModel(effectiveModels));
-    }
+    if (!selected.model && effectiveModels.length > 0) setSelected(pickDefaultModel(effectiveModels));
   }, [effectiveModels, selected.model]);
+
+  // Consume a prefill handed over from the chat tab (/goal, /plan).
+  useEffect(() => {
+    if (!prefill) return;
+    if (prefill.mode) setMode(prefill.mode);
+    if (prefill.goal !== undefined) setGoal(prefill.goal);
+    onPrefillConsumed();
+    textareaRef.current?.focus();
+  }, [prefill, onPrefillConsumed]);
 
   const modelGroups = useMemo(() => {
     const groups: { provider_id: string; provider_name: string; models: string[] }[] = [];
@@ -112,30 +139,71 @@ export function AgentsView({ providerModels, fallbackModel, catalog, availableMo
     return groups;
   }, [effectiveModels]);
 
-  const handleRun = () => {
-    const g = goal.trim();
-    if (!g || isRunning) return;
-    setViewing(null);
+  const runWith = (g: string, runMode: AgentMode) => {
+    if (!g.trim() || isRunning) return;
+    onClearViewing();
     start({
-      goal: g,
+      goal: g.trim(),
       model: selected.model || null,
       provider_id: selected.providerId || null,
+      agent_id: selectedAgentId,
       skill_id: skillId === 'auto' || skillId === '' ? null : skillId,
       skill_auto: skillId === 'auto',
       tool_mode: toolMode,
       tool_names: toolNames,
       allow_subagents: allowSub,
+      team_agent_ids: teamEnabled && teamIds.length ? teamIds : null,
+      mode: runMode,
     });
+    setGoal('');
   };
 
-  const openRun = async (id: string) => {
-    try {
-      const detail = await getRun(id);
-      setViewing(detail);
-    } catch { /* ignore */ }
+  // Continue the run currently shown (a finished live run, or a viewed past run).
+  const continuableRunId = viewing ? viewing.id : currentRunId;
+  const canContinue = !!continuableRunId && !isRunning;
+
+  const handleContinue = () => {
+    if (!followup.trim() || !continuableRunId || isRunning) return;
+    // If continuing a viewed run, load its steps into the live timeline first so new
+    // steps append rather than replacing the view.
+    if (viewing) { primeFromRun(viewing); onClearViewing(); }
+    continueRun(continuableRunId, {
+      message: followup.trim(),
+      mode,
+      tool_mode: toolMode,
+      tool_names: toolNames,
+      team_agent_ids: teamEnabled && teamIds.length ? teamIds : null,
+    });
+    setFollowup('');
   };
 
-  // Convert a persisted run's steps into LiveStep shape for the timeline
+  const handleRun = () => {
+    const m = goal.match(/^\/(\w+)\s*([\s\S]*)$/);
+    if (m) {
+      const name = m[1].toLowerCase();
+      const rest = m[2] ?? '';
+      if (name === 'auto' || name === 'goal' || name === 'plan') {
+        setMode(name);
+        if (rest.trim()) { runWith(rest, name); } else { setGoal(''); }
+        return;
+      }
+      if (name === 'agents') { onOpenManager(); setGoal(''); return; }
+      if (name === 'multiagent') { setAllowSub((v) => !v); setGoal(''); return; }
+      if (name === 'clear') { setGoal(''); onClearViewing(); return; }
+      // unknown → fall through and run as a normal goal
+    }
+    runWith(goal, mode);
+  };
+
+  const slashCommands: SlashCommand[] = [
+    { name: 'goal', args: '<task>', description: 'Autonomous mode — work until the goal is achieved', Icon: Target, accent: 'text-emerald-400', takesArgs: true, run: () => { setMode('goal'); setGoal(''); } },
+    { name: 'plan', args: '<task>', description: 'Produce a step-by-step plan, no execution', Icon: ClipboardList, accent: 'text-amber-400', takesArgs: true, run: () => { setMode('plan'); setGoal(''); } },
+    { name: 'auto', description: 'One focused pass (default mode)', Icon: Zap, accent: 'text-blue-400', run: () => { setMode('auto'); setGoal(''); } },
+    { name: 'agents', description: 'Create and manage saved agents', Icon: Bot, accent: 'text-blue-400', run: () => { onOpenManager(); setGoal(''); } },
+    { name: 'multiagent', description: 'Toggle spawning sub-agents', Icon: Users, accent: 'text-pink-400', run: () => { setAllowSub((v) => !v); setGoal(''); } },
+    { name: 'clear', description: 'Clear the composer', Icon: Eraser, run: () => { setGoal(''); onClearViewing(); } },
+  ];
+
   const viewingSteps: LiveStep[] = useMemo(() => {
     if (!viewing) return [];
     return viewing.steps.map((s) => ({
@@ -150,201 +218,227 @@ export function AgentsView({ providerModels, fallbackModel, catalog, availableMo
   const showingLive = !viewing;
 
   return (
-    <div className="flex-1 flex min-h-0">
-      {/* Main column */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Composer */}
-        <div className="border-b border-zinc-800 px-6 py-4 bg-zinc-950">
-          <div className="max-w-3xl mx-auto space-y-3">
-            <div className="flex items-center gap-2 text-zinc-300">
-              <Bot size={18} className="text-blue-400" />
-              <h2 className="text-sm font-semibold">Agents</h2>
-              <span className="text-xs text-zinc-600">Give a goal — the agent plans, uses tools, and reports back.</span>
-            </div>
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* Composer */}
+      <div className="border-b border-zinc-800 px-6 py-4 bg-zinc-950">
+        <div className="max-w-3xl mx-auto space-y-3">
+          <div className="flex items-center gap-2 text-zinc-300">
+            <Bot size={18} className="text-blue-400" />
+            <h2 className="text-sm font-semibold">Agents</h2>
+            <span className="text-xs text-zinc-600">Give a goal — type <span className="font-mono text-zinc-500">/</span> for commands.</span>
+            {selectedAgent && (
+              <span className="ml-auto flex items-center gap-1.5 text-xs bg-blue-950/40 text-blue-300 rounded-lg px-2 py-1">
+                <Bot size={11} /> {selectedAgent.name}
+                <button onClick={() => onSelectedAgentChange(null)} className="hover:text-white"><X size={11} /></button>
+              </span>
+            )}
+          </div>
 
+          <div className="relative">
             <textarea
+              ref={textareaRef}
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleRun(); }}
-              placeholder="e.g. Calculate the compound interest on $1000 at 5% for 3 years, then summarize the result."
+              onKeyDown={(e) => {
+                if (slashRef.current?.handleKeyDown(e)) return;
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleRun();
+              }}
+              placeholder="e.g. Research the top 3 vector databases and recommend one. Type / for commands."
               rows={3}
               className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 resize-none outline-none focus:border-zinc-500 transition-colors"
             />
+            <SlashCommandMenu ref={slashRef} commands={slashCommands} value={goal} onPick={() => textareaRef.current?.focus()} placement="down" />
+          </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* Skill selector — same control as the chat tab */}
-              <SkillPicker value={skillId} onChange={setSkillId} skills={skills} placement="down" />
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Execution mode */}
+            <ModePicker value={mode} onChange={setMode} placement="down" />
 
-              {/* Tools: Off / Auto / Always + optional per-tool restriction */}
-              <ToolPicker
-                mode={toolMode}
-                onMode={setToolMode}
-                selected={toolNames}
-                onSelected={setToolNames}
-                tools={tools}
-                placement="down"
-              />
+            {/* Skill selector — same control as chat */}
+            <SkillPicker value={skillId} onChange={setSkillId} skills={skills} placement="down" />
 
-              {/* Model selector */}
+            {/* Tools */}
+            <ToolPicker mode={toolMode} onMode={setToolMode} selected={toolNames} onSelected={setToolNames} tools={tools} placement="down" />
+
+            {/* Model selector */}
+            <div className="relative">
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); setModelOpen((o) => !o); }}
+                className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 transition-colors"
+              >
+                <span className="max-w-[160px] truncate">{selected.model || 'Select model'}</span>
+                <ChevronDown size={11} className={clsx('transition-transform', modelOpen && 'rotate-180')} />
+              </button>
+              {modelOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setModelOpen(false)} />
+                  <div className="absolute top-full left-0 mt-1 w-72 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 max-h-72 overflow-y-auto py-1">
+                    {modelGroups.length === 0 ? (
+                      <p className="text-zinc-500 text-xs px-3 py-3">No models — open Settings → Providers to add one.</p>
+                    ) : modelGroups.map((g) => (
+                      <div key={g.provider_id}>
+                        <p className="px-3 pt-2 pb-1 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{g.provider_name}</p>
+                        {g.models.map((m) => (
+                          <button
+                            key={`${g.provider_id}:${m}`}
+                            type="button"
+                            onMouseDown={(e) => { e.preventDefault(); setSelected({ model: m, providerId: g.provider_id }); setModelOpen(false); }}
+                            className={clsx('w-full text-left px-4 py-1.5 text-sm transition-colors',
+                              m === selected.model ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}
+                          >
+                            <span className="truncate block">{m}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Multi-agent toggle */}
+            <button
+              type="button"
+              onClick={() => setAllowSub((v) => !v)}
+              className={clsx('flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs border transition-colors',
+                allowSub ? 'bg-pink-950/40 border-pink-800/60 text-pink-300' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200')}
+              title="Allow the agent to spawn sub-agents for parallel subtasks"
+            >
+              <Users size={12} /> Multi-agent {allowSub ? 'on' : 'off'}
+            </button>
+
+            {/* Team multi-select — agents the coordinator can delegate to */}
+            {teamEnabled && (
               <div className="relative">
                 <button
                   type="button"
-                  onMouseDown={(e) => { e.preventDefault(); setModelOpen((o) => !o); }}
-                  className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 transition-colors"
+                  onMouseDown={(e) => { e.preventDefault(); setTeamOpen((o) => !o); }}
+                  className={clsx('flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs border transition-colors',
+                    teamIds.length ? 'bg-pink-950/40 border-pink-800/60 text-pink-300' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200')}
+                  title="Pick specialised agents the coordinator can delegate subtasks to"
                 >
-                  <span className="max-w-[160px] truncate">{selected.model || 'Select model'}</span>
-                  <ChevronDown size={11} className={clsx('transition-transform', modelOpen && 'rotate-180')} />
+                  <Users size={12} /> Team{teamIds.length ? ` · ${teamIds.length}` : ''}
+                  <ChevronDown size={11} className={clsx('transition-transform', teamOpen && 'rotate-180')} />
                 </button>
-                {modelOpen && (
+                {teamOpen && (
                   <>
-                    <div className="fixed inset-0 z-40" onClick={() => setModelOpen(false)} />
-                    <div className="absolute top-full left-0 mt-1 w-72 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 max-h-72 overflow-y-auto py-1">
-                      {modelGroups.length === 0 ? (
-                        <p className="text-zinc-500 text-xs px-3 py-3">No models — open Settings → Providers to add one.</p>
-                      ) : modelGroups.map((g) => (
-                        <div key={g.provider_id}>
-                          <p className="px-3 pt-2 pb-1 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{g.provider_name}</p>
-                          {g.models.map((m) => (
-                            <button
-                              key={`${g.provider_id}:${m}`}
-                              type="button"
-                              onMouseDown={(e) => { e.preventDefault(); setSelected({ model: m, providerId: g.provider_id }); setModelOpen(false); }}
-                              className={clsx('w-full text-left px-4 py-1.5 text-sm transition-colors',
-                                m === selected.model ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}
-                            >
-                              <span className="truncate block">{m}</span>
-                            </button>
-                          ))}
-                        </div>
-                      ))}
+                    <div className="fixed inset-0 z-40" onClick={() => setTeamOpen(false)} />
+                    <div className="absolute bottom-full left-0 mb-1 w-64 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 max-h-72 overflow-y-auto py-1">
+                      {teamCandidates.length === 0 ? (
+                        <p className="text-zinc-500 text-xs px-3 py-3">No other agents yet — create some in the Agents manager.</p>
+                      ) : teamCandidates.map((a) => {
+                        const on = teamIds.includes(a.id);
+                        return (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setTeamIds((p) => on ? p.filter((x) => x !== a.id) : [...p, a.id]);
+                            }}
+                            className={clsx('w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors',
+                              on ? 'bg-zinc-700 text-white' : 'text-zinc-300 hover:bg-zinc-700')}
+                          >
+                            <span className={clsx('w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0',
+                              on ? 'bg-pink-500 border-pink-500' : 'border-zinc-500')}>
+                              {on && <span className="text-[9px] text-white leading-none">✓</span>}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="truncate block">{a.name}</span>
+                              {a.description && <span className="truncate block text-[10px] text-zinc-500">{a.description}</span>}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </>
                 )}
               </div>
+            )}
 
-              {/* Multi-agent toggle */}
-              <button
-                type="button"
-                onClick={() => setAllowSub((v) => !v)}
-                className={clsx('flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs border transition-colors',
-                  allowSub ? 'bg-pink-950/40 border-pink-800/60 text-pink-300' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200')}
-                title="Allow the agent to spawn sub-agents for parallel subtasks"
-              >
-                <Users size={12} /> Multi-agent {allowSub ? 'on' : 'off'}
-              </button>
+            <div className="flex-1" />
 
-              <div className="flex-1" />
-
-              <button
-                onClick={isRunning ? stop : handleRun}
-                disabled={!isRunning && !goal.trim()}
-                className={clsx('flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
-                  isRunning ? 'bg-red-600 hover:bg-red-700 text-white'
-                    : goal.trim() ? 'bg-white text-black hover:bg-zinc-200' : 'bg-zinc-700 text-zinc-500 cursor-not-allowed')}
-              >
-                {isRunning ? <><Square size={13} /> Stop</> : <><Send size={13} /> Run</>}
-              </button>
-            </div>
+            <button
+              onClick={isRunning ? stop : handleRun}
+              disabled={!isRunning && !goal.trim()}
+              className={clsx('flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors',
+                isRunning ? 'bg-red-600 hover:bg-red-700 text-white'
+                  : goal.trim() ? 'bg-white text-black hover:bg-zinc-200' : 'bg-zinc-700 text-zinc-500 cursor-not-allowed')}
+            >
+              {isRunning ? <><Square size={13} /> Stop</> : <><Send size={13} /> Run</>}
+            </button>
           </div>
         </div>
+      </div>
 
-        {/* Timeline */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          <div className="max-w-3xl mx-auto">
-            {viewing && (
-              <div className="mb-4 flex items-center justify-between">
-                <div className="min-w-0">
-                  <p className="text-xs text-zinc-500">Viewing past run · <span className={statusColor(viewing.status)}>{viewing.status}</span></p>
-                  <p className="text-sm text-zinc-300 truncate">{viewing.goal}</p>
-                </div>
-                <button onClick={() => setViewing(null)} className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded-lg hover:bg-zinc-800">
-                  New run
+      {/* Timeline */}
+      <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="max-w-3xl mx-auto">
+          {viewing && (
+            <div className="mb-4 flex items-center justify-between">
+              <div className="min-w-0">
+                <p className="text-xs text-zinc-500">
+                  Viewing past run · <span className={statusColor(viewing.status)}>{viewing.status}</span>
+                  {viewing.mode && viewing.mode !== 'auto' && <span className="text-zinc-600"> · {viewing.mode}</span>}
+                </p>
+                <p className="text-sm text-zinc-300 truncate">{viewing.goal}</p>
+              </div>
+              <button onClick={onClearViewing} className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded-lg hover:bg-zinc-800">
+                New run
+              </button>
+            </div>
+          )}
+
+          {runError && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-red-950/40 border border-red-900/50 text-red-300 text-sm">
+              {runError}
+            </div>
+          )}
+
+          {showingLive && liveSteps.length === 0 && !isRunning && (
+            <div className="flex flex-col items-center justify-center text-center py-20 text-zinc-600">
+              <Bot size={36} className="mb-3" />
+              <p className="text-sm">Describe a goal above and hit Run.</p>
+              <p className="text-xs mt-1 text-zinc-700">Use <span className="font-mono">/goal</span> for autonomous mode or <span className="font-mono">/plan</span> to plan first.</p>
+            </div>
+          )}
+
+          <StepTimeline
+            steps={showingLive ? liveSteps : viewingSteps}
+            running={showingLive && isRunning}
+          />
+
+          {/* Continue this run with a follow-up */}
+          {canContinue && (viewing || liveSteps.length > 0) && (
+            <div className="mt-5 border-t border-zinc-800 pt-4">
+              <p className="text-[11px] text-zinc-500 mb-1.5 flex items-center gap-1">
+                <CornerDownRight size={11} /> Continue this run — ask a follow-up or refine the result.
+              </p>
+              <div className="flex items-end gap-2">
+                <textarea
+                  value={followup}
+                  onChange={(e) => setFollowup(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleContinue(); }
+                  }}
+                  placeholder="e.g. Now also compare pricing, or fix the issue you found…"
+                  rows={2}
+                  className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 resize-none outline-none focus:border-zinc-500 transition-colors"
+                />
+                <button
+                  onClick={handleContinue}
+                  disabled={!followup.trim()}
+                  className={clsx('flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors',
+                    followup.trim() ? 'bg-white text-black hover:bg-zinc-200' : 'bg-zinc-700 text-zinc-500 cursor-not-allowed')}
+                >
+                  <Send size={13} /> Continue
                 </button>
               </div>
-            )}
-
-            {runError && (
-              <div className="mb-3 px-3 py-2 rounded-lg bg-red-950/40 border border-red-900/50 text-red-300 text-sm">
-                {runError}
-              </div>
-            )}
-
-            {showingLive && liveSteps.length === 0 && !isRunning && (
-              <div className="flex flex-col items-center justify-center text-center py-20 text-zinc-600">
-                <Bot size={36} className="mb-3" />
-                <p className="text-sm">Describe a goal above and hit Run.</p>
-                <p className="text-xs mt-1 text-zinc-700">The agent can do math, recall memory, call MCP tools, and spawn sub-agents.</p>
-              </div>
-            )}
-
-            <StepTimeline
-              steps={showingLive ? liveSteps : viewingSteps}
-              running={showingLive && isRunning}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Run history */}
-      <div className={clsx('border-l border-zinc-800 bg-zinc-900/40 flex flex-col transition-all', showHistory ? 'w-72' : 'w-0 overflow-hidden')}>
-        <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
-          <History size={14} className="text-zinc-500" />
-          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wide">Run history</span>
-          <div className="ml-auto flex items-center gap-2">
-            <button onClick={loadRuns} className="text-xs text-zinc-500 hover:text-zinc-300">Refresh</button>
-            {runs.length > 0 && (
-              <button
-                onClick={() => { if (confirm('Delete all run history? This cannot be undone.')) clearAllRuns(); }}
-                className="text-xs text-zinc-500 hover:text-red-400"
-                title="Clear all run history"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {runs.length === 0 ? (
-            <p className="text-zinc-600 text-xs text-center py-6">No runs yet</p>
-          ) : runs.map((r) => (
-            <div
-              key={r.id}
-              className={clsx('group relative w-full rounded-lg transition-colors',
-                viewing?.id === r.id ? 'bg-zinc-700/60' : 'hover:bg-zinc-800')}
-            >
-              <button
-                onClick={() => openRun(r.id)}
-                className="w-full text-left px-3 py-2 pr-8"
-              >
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className={clsx('w-1.5 h-1.5 rounded-full', statusColor(r.status).replace('text-', 'bg-'))} />
-                  <span className={clsx('text-[10px] uppercase tracking-wide', statusColor(r.status))}>{r.status}</span>
-                </div>
-                <p className="text-xs text-zinc-400 line-clamp-2 leading-snug">{r.goal}</p>
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (viewing?.id === r.id) setViewing(null);
-                  removeRun(r.id);
-                }}
-                className="absolute right-1.5 top-1.5 p-1 rounded-md text-zinc-600 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-950/30 transition-all"
-                title="Delete run"
-              >
-                <Trash2 size={12} />
-              </button>
             </div>
-          ))}
+          )}
         </div>
       </div>
-
-      <button
-        onClick={() => setShowHistory((v) => !v)}
-        className="absolute right-2 top-2 z-10 p-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700 text-zinc-400 hover:text-zinc-200 lg:hidden"
-        title="Toggle history"
-      >
-        <History size={14} />
-      </button>
     </div>
   );
 }

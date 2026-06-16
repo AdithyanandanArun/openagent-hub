@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MessageSquare, Bot } from 'lucide-react';
 import clsx from 'clsx';
 import { Sidebar } from '../components/Sidebar';
@@ -6,6 +6,7 @@ import { ChatWindow } from '../components/ChatWindow';
 import { ChatInput } from '../components/ChatInput';
 import { ProviderSettingsDialog } from '../components/ProviderSettingsDialog';
 import { AgentsView } from '../components/AgentsView';
+import { AgentManagerDialog } from '../components/AgentManagerDialog';
 import { useChat } from '../hooks/useChat';
 import { useProjects } from '../hooks/useProjects';
 import { useProviderSettings } from '../hooks/useProviderSettings';
@@ -13,6 +14,8 @@ import { useProviders } from '../hooks/useProviders';
 import { useCatalog } from '../hooks/useCatalog';
 import { useSkills } from '../hooks/useSkills';
 import { useAgentTools } from '../hooks/useAgentTools';
+import { useAgents } from '../hooks/useAgents';
+import { getRun, AgentRunDetail, AgentMode, Agent } from '../services/agents';
 import { User } from '../services/auth';
 import { ProviderConfig } from '../services/chat';
 
@@ -46,6 +49,7 @@ export function ChatPage({ user, onLogout }: Props) {
   const { catalog, sync: syncCatalog } = useCatalog();
   const { skills } = useSkills();
   const { tools } = useAgentTools();
+  const agents = useAgents();
 
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
@@ -54,10 +58,25 @@ export function ChatPage({ user, onLogout }: Props) {
   const [thinkingLabel, setThinkingLabel] = useState('Thinking');
   const [view, setView] = useState<'chat' | 'agents'>('chat');
 
+  // Agents-tab shared state.
+  const [viewingRun, setViewingRun] = useState<AgentRunDetail | null>(null);
+  const [showAgentManager, setShowAgentManager] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [agentPrefill, setAgentPrefill] = useState<{ goal?: string; mode?: AgentMode } | null>(null);
+
   useEffect(() => {
     loadConversations(selectedProjectId);
     loadProjects();
   }, [loadConversations, loadProjects, selectedProjectId]);
+
+  // Default the Agents tab to the built-in Orchestrator so a run always has an agent.
+  useEffect(() => {
+    if (selectedAgentId) return;
+    const orch =
+      agents.agents.find((a) => a.is_builtin && a.name === 'Orchestrator')
+      ?? agents.agents.find((a) => a.is_builtin);
+    if (orch) setSelectedAgentId(orch.id);
+  }, [agents.agents, selectedAgentId]);
 
   // Set initial model from single config if no provider model selected yet
   useEffect(() => {
@@ -118,12 +137,39 @@ export function ChatPage({ user, onLogout }: Props) {
     setShowSettings(true);
   };
 
+  // ── Agents-tab handlers ──────────────────────────────────────────────────────
+  const openRun = async (id: string) => {
+    setView('agents');
+    try { setViewingRun(await getRun(id)); } catch { /* ignore */ }
+  };
+
+  const switchToAgents = (prefill?: { goal?: string; mode?: AgentMode }) => {
+    setView('agents');
+    setViewingRun(null);
+    if (prefill) setAgentPrefill(prefill);
+  };
+
+  const useAgent = (a: Agent) => {
+    setView('agents');
+    setSelectedAgentId(a.id);
+    setShowAgentManager(false);
+  };
+
+  // Model options for the agent manager's dropdown.
+  const managerModels = useMemo(
+    () => providerModels.length
+      ? providerModels.map((m) => ({ model: m.model, provider_id: m.provider_id, provider_name: m.provider_name }))
+      : availableModels.map((m) => ({ model: m, provider_id: null as string | null })),
+    [providerModels, availableModels],
+  );
+
   // Decide which model list to show: use providerModels if available, else flat list
   const hasProviderModels = providerModels.length > 0;
 
   return (
     <div className="flex h-screen bg-zinc-950 text-white overflow-hidden">
       <Sidebar
+        mode={view}
         conversations={conversations}
         currentId={currentConversation?.id}
         onSelect={handleSelectConversation}
@@ -136,6 +182,15 @@ export function ChatPage({ user, onLogout }: Props) {
         onAddProject={addProject}
         onRenameProject={renameProject}
         onDeleteProject={removeProject}
+        runs={agents.runs}
+        currentRunId={viewingRun?.id ?? null}
+        onSelectRun={openRun}
+        onDeleteRun={(id) => { if (viewingRun?.id === id) setViewingRun(null); agents.removeRun(id); }}
+        onClearRuns={() => { setViewingRun(null); agents.clearAllRuns(); }}
+        onNewRun={() => { setView('agents'); setViewingRun(null); }}
+        agents={agents.agents}
+        onManageAgents={() => { setView('agents'); setShowAgentManager(true); }}
+        onUseAgent={useAgent}
         username={user.username}
         onOpenSettings={handleOpenSettings}
       />
@@ -184,6 +239,8 @@ export function ChatPage({ user, onLogout }: Props) {
               skills={skills}
               tools={tools}
               onModelChange={handleModelChange}
+              onSwitchToAgents={switchToAgents}
+              onClearChat={handleNewChat}
             />
           </>
         ) : (
@@ -192,9 +249,40 @@ export function ChatPage({ user, onLogout }: Props) {
             fallbackModel={selectedModel || config?.model || ''}
             catalog={catalog}
             availableModels={availableModels}
+            skills={skills}
+            tools={tools}
+            liveSteps={agents.liveSteps}
+            isRunning={agents.isRunning}
+            runError={agents.runError}
+            currentRunId={agents.currentRunId}
+            start={agents.start}
+            stop={agents.stop}
+            continueRun={agents.continueRun}
+            primeFromRun={agents.primeFromRun}
+            viewing={viewingRun}
+            onClearViewing={() => setViewingRun(null)}
+            savedAgents={agents.agents}
+            selectedAgentId={selectedAgentId}
+            onSelectedAgentChange={setSelectedAgentId}
+            onOpenManager={() => setShowAgentManager(true)}
+            prefill={agentPrefill}
+            onPrefillConsumed={() => setAgentPrefill(null)}
           />
         )}
       </div>
+
+      {showAgentManager && (
+        <AgentManagerDialog
+          agents={agents.agents}
+          skills={skills}
+          models={managerModels}
+          onClose={() => setShowAgentManager(false)}
+          onCreate={async (p) => { await agents.createAgent(p); }}
+          onUpdate={async (id, p) => { await agents.updateAgent(id, p); }}
+          onDelete={async (id) => { await agents.removeAgent(id); }}
+          onUse={useAgent}
+        />
+      )}
 
       {showSettings && (
         <ProviderSettingsDialog

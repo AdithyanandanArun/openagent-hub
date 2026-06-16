@@ -29,10 +29,13 @@ export interface AgentStep {
   created_at: string;
 }
 
+export type AgentMode = 'auto' | 'goal' | 'plan';
+
 export interface AgentRun {
   id: string;
   goal: string;
   role: string | null;
+  mode?: AgentMode | null;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
   result: string | null;
   error: string | null;
@@ -117,13 +120,24 @@ export interface RunAgentParams {
   skill_auto?: boolean;
   conversation_id?: string | null;
   allow_subagents?: boolean;
+  team_agent_ids?: string[] | null;
   tool_mode?: 'off' | 'auto' | 'always';
   tool_names?: string[] | null;
+  mode?: AgentMode;
 }
 
-/** Start an agent run and stream events over SSE. Returns an AbortController. */
-export function runAgent(
-  params: RunAgentParams,
+export interface ContinueRunParams {
+  message: string;
+  mode?: AgentMode;
+  tool_mode?: 'off' | 'auto' | 'always';
+  tool_names?: string[] | null;
+  team_agent_ids?: string[] | null;
+}
+
+/** POST a JSON body and stream the SSE response. Returns an AbortController. */
+function streamSSE(
+  url: string,
+  body: unknown,
   token: string,
   onEvent: (evt: RunEvent) => void,
   onDone: () => void,
@@ -131,13 +145,13 @@ export function runAgent(
 ): AbortController {
   const controller = new AbortController();
 
-  fetch('/api/agents/run', {
+  fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify(params),
+    body: JSON.stringify(body),
     signal: controller.signal,
   })
     .then(async (response) => {
@@ -178,4 +192,27 @@ export function runAgent(
     });
 
   return controller;
+}
+
+/** Start an agent run and stream events over SSE. Returns an AbortController. */
+export function runAgent(
+  params: RunAgentParams,
+  token: string,
+  onEvent: (evt: RunEvent) => void,
+  onDone: () => void,
+  onError: (error: string) => void,
+): AbortController {
+  return streamSSE('/api/agents/run', params, token, onEvent, onDone, onError);
+}
+
+/** Continue an existing run with a follow-up message; streams new steps over SSE. */
+export function continueRun(
+  runId: string,
+  params: ContinueRunParams,
+  token: string,
+  onEvent: (evt: RunEvent) => void,
+  onDone: () => void,
+  onError: (error: string) => void,
+): AbortController {
+  return streamSSE(`/api/agents/runs/${runId}/continue`, params, token, onEvent, onDone, onError);
 }

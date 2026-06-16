@@ -34,7 +34,11 @@ class ToolContext:
     project_id: Optional[UUID] = None
     allow_subagents: bool = False
     depth: int = 0
-    spawn_fn: Optional[Callable[[str, str], Awaitable[str]]] = None
+    # spawn_fn(role, goal, agent_id=None) -> result text. agent_id selects a saved
+    # agent template for the sub-agent; None spawns a generic worker.
+    spawn_fn: Optional[Callable[..., Awaitable[str]]] = None
+    # Roster of saved agents the coordinator may delegate to (multi-agent teams).
+    team: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -254,9 +258,9 @@ def _spawn_tool() -> ToolDef:
     return ToolDef(
         name="spawn_agent",
         description=(
-            "Delegate a focused subtask to a specialised sub-agent and get its result back. "
-            "Use this to parallelise independent pieces of work (research, coding, analysis). "
-            "Provide a clear role and a self-contained goal."
+            "Delegate a focused subtask to a generic specialised sub-agent and get its result back. "
+            "Use this to parallelise independent pieces of work (research, coding, analysis) when no "
+            "saved team member fits. Provide a clear role and a self-contained goal."
         ),
         parameters={
             "type": "object",
@@ -265,6 +269,57 @@ def _spawn_tool() -> ToolDef:
                 "goal": {"type": "string", "description": "A self-contained task for the sub-agent to complete"},
             },
             "required": ["role", "goal"],
+        },
+        handler=handler,
+    )
+
+
+def _delegate_tool(team: list[dict]) -> ToolDef:
+    """Tool that delegates a subtask to a SPECIFIC saved agent from the team.
+
+    `team` is a list of {"id", "name", "description"}. The model picks an agent by
+    name; we run that agent's template (its own system prompt, skill, model) as a
+    sub-agent and return its result."""
+    by_name = {str(a["name"]): a for a in team}
+
+    async def handler(ctx: ToolContext, args: dict) -> str:
+        if not ctx.spawn_fn:
+            return "Error: sub-agents are not enabled for this run."
+        name = str(args.get("agent", "")).strip()
+        goal = str(args.get("goal", "")).strip()
+        if not goal:
+            return "Error: goal is required to delegate to an agent."
+        member = by_name.get(name)
+        if not member:
+            # tolerate case / partial mismatches
+            member = next((a for a in team if str(a["name"]).lower() == name.lower()), None)
+        if not member:
+            available = ", ".join(by_name.keys()) or "(none)"
+            return f"Error: no team agent named '{name}'. Available agents: {available}."
+        return await ctx.spawn_fn(member["name"], goal, agent_id=member["id"])
+
+    roster = "\n".join(
+        f"  - {a['name']}: {(a.get('description') or 'specialised agent').strip()}" for a in team
+    )
+    return ToolDef(
+        name="delegate",
+        description=(
+            "Delegate a self-contained subtask to one of your specialised TEAM agents and get its "
+            "result back. Each team agent has its own expertise — pick the best fit. Delegate "
+            "independent subtasks so they can be combined into the final result.\n"
+            f"Available team agents:\n{roster}"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Name of the team agent to delegate to",
+                    "enum": [str(a["name"]) for a in team] or None,
+                },
+                "goal": {"type": "string", "description": "A self-contained task for that agent to complete"},
+            },
+            "required": ["agent", "goal"],
         },
         handler=handler,
     )
@@ -279,11 +334,14 @@ def build_registry(
     user_id: UUID,
     allow_subagents: bool = False,
     allowed_tool_names: list[str] | None = None,
+    team: list[dict] | None = None,
 ) -> dict[str, ToolDef]:
     """Assemble the full tool registry for a run.
 
     `allowed_tool_names` (from a skill) optionally restricts the built-in/MCP tools;
-    spawn_agent is governed solely by `allow_subagents`."""
+    spawn_agent/delegate are governed solely by `allow_subagents`. When `team` is
+    provided, a `delegate` tool is added so the coordinator can route subtasks to
+    those specific saved agents."""
     registry: dict[str, ToolDef] = {}
     registry.update(BUILTIN_TOOLS)
     registry.update(get_mcp_tools(db, user_id))
@@ -295,6 +353,9 @@ def build_registry(
     if allow_subagents:
         spawn = _spawn_tool()
         registry[spawn.name] = spawn
+        if team:
+            delegate = _delegate_tool(team)
+            registry[delegate.name] = delegate
 
     return registry
 

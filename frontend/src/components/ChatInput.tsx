@@ -1,13 +1,14 @@
 import { useState, useRef, KeyboardEvent } from 'react';
-import { Send, Square, Paperclip, X, FileText, Image, ChevronDown, Eye, Brain, Zap } from 'lucide-react';
+import { Send, Square, Paperclip, X, FileText, Image, ChevronDown, Eye, Brain, Zap, Bot, Target, ClipboardList, Eraser } from 'lucide-react';
 import clsx from 'clsx';
 import { uploadAttachment, AttachmentMeta } from '../services/attachments';
 import { ProviderModel } from '../hooks/useProviders';
 import { CatalogModel } from '../services/catalog';
 import { Skill } from '../services/skills';
-import { AgentTool } from '../services/agents';
+import { AgentTool, AgentMode } from '../services/agents';
 import { ToolPicker, ToolMode } from './ToolPicker';
 import { SkillPicker } from './SkillPicker';
+import { SlashCommandMenu, SlashCommand, SlashMenuHandle } from './SlashCommandMenu';
 
 interface Props {
   onSend: (message: string, attachmentIds: string[], opts: { toolMode: ToolMode; toolNames: string[]; skillId: string | null; skillAuto: boolean }) => void;
@@ -21,6 +22,10 @@ interface Props {
   skills?: Skill[];
   tools?: AgentTool[];
   onModelChange: (model: string, providerId?: string | null) => void;
+  /** Jump to the Agents workspace, optionally prefilling a goal/mode (/agents, /goal, /plan). */
+  onSwitchToAgents?: (prefill?: { goal?: string; mode?: AgentMode }) => void;
+  /** Start a new chat (/clear). */
+  onClearChat?: () => void;
 }
 
 function FileChip({ att, onRemove }: { att: AttachmentMeta; onRemove: () => void }) {
@@ -150,7 +155,7 @@ function ModelPicker({
   );
 }
 
-export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availableModels, providerModels, catalog, skills, tools, onModelChange }: Props) {
+export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availableModels, providerModels, catalog, skills, tools, onModelChange, onSwitchToAgents, onClearChat }: Props) {
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -162,8 +167,29 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
   const [skillId, setSkillId] = useState<string>('auto');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const slashRef = useRef<SlashMenuHandle>(null);
+
+  // Slash commands available from the chat composer.
+  const slashCommands: SlashCommand[] = [
+    { name: 'agents', description: 'Open the Agents workspace', Icon: Bot, accent: 'text-blue-400', run: () => { onSwitchToAgents?.(); setValue(''); } },
+    { name: 'goal', args: '<task>', description: 'Run an autonomous agent until the goal is achieved', Icon: Target, accent: 'text-emerald-400', takesArgs: true, run: () => { onSwitchToAgents?.({ mode: 'goal', goal: '' }); setValue(''); } },
+    { name: 'plan', args: '<task>', description: 'Plan a task step-by-step in Agents', Icon: ClipboardList, accent: 'text-amber-400', takesArgs: true, run: () => { onSwitchToAgents?.({ mode: 'plan', goal: '' }); setValue(''); } },
+    { name: 'clear', description: 'Start a new chat', Icon: Eraser, run: () => { onClearChat?.(); setValue(''); } },
+  ];
 
   const handleSend = () => {
+    // Intercept a leading slash command before sending as a message.
+    const cmd = value.trim().match(/^\/(\w+)\s*([\s\S]*)$/);
+    if (cmd) {
+      const name = cmd[1].toLowerCase();
+      const rest = (cmd[2] ?? '').trim();
+      if (name === 'agents') { onSwitchToAgents?.(); setValue(''); return; }
+      if (name === 'goal') { onSwitchToAgents?.({ mode: 'goal', goal: rest }); setValue(''); return; }
+      if (name === 'plan') { onSwitchToAgents?.({ mode: 'plan', goal: rest }); setValue(''); return; }
+      if (name === 'clear') { onClearChat?.(); setValue(''); return; }
+      // unknown command → fall through and send as a normal message
+    }
+
     const msg = value.trim();
     if ((!msg && attachments.length === 0) || isStreaming) return;
     const ids = attachments.map((a) => a.id);
@@ -179,6 +205,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashRef.current?.handleKeyDown(e)) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -224,14 +251,15 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
 
       <div className="bg-zinc-800 border border-zinc-700 rounded-2xl focus-within:border-zinc-500 transition-colors">
         {/* Text area */}
-        <div className="px-4 pt-3 pb-1">
+        <div className="px-4 pt-3 pb-1 relative">
+          <SlashCommandMenu ref={slashRef} commands={slashCommands} value={value} onPick={() => textareaRef.current?.focus()} placement="up" />
           <textarea
             ref={textareaRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onInput={handleInput}
-            placeholder={disabled ? 'Configure your provider in Settings first...' : 'Message OpenAgent Hub...'}
+            placeholder={disabled ? 'Configure your provider in Settings first...' : 'Message OpenAgent Hub…  (/ for commands)'}
             disabled={disabled && !isStreaming}
             rows={1}
             className="w-full bg-transparent text-zinc-100 placeholder-zinc-500 resize-none outline-none text-sm leading-relaxed max-h-48 disabled:cursor-not-allowed"

@@ -14,7 +14,7 @@ from app.models.agent import Agent
 from app.models.agent_run import AgentRun
 from app.schemas.agent import (
     AgentCreate, AgentUpdate, AgentResponse,
-    AgentRunCreate, AgentRunResponse, AgentRunDetailResponse,
+    AgentRunCreate, AgentRunResponse, AgentRunDetailResponse, AgentRunContinue,
 )
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -44,10 +44,13 @@ def list_tools(user=Depends(_current_user), db: Session = Depends(get_db)):
 
 @router.get("", response_model=List[AgentResponse])
 def list_agents(user=Depends(_current_user), db: Session = Depends(get_db)):
+    # Ensure the built-in Orchestrator exists (lazy, idempotent) so the Agents tab
+    # always has a sensible default agent.
+    agent_service.seed_builtin_agents(db, user.id)
     return (
         db.query(Agent)
         .filter(Agent.user_id == user.id)
-        .order_by(Agent.created_at)
+        .order_by(Agent.is_builtin.desc(), Agent.created_at)
         .all()
     )
 
@@ -146,6 +149,12 @@ async def run_agent_stream(
     user = get_current_user(db, credentials.credentials)
 
     allow_override = data.allow_subagents
+
+    # Normalize execution mode.
+    run_mode = (data.mode or "auto").lower()
+    if run_mode not in ("auto", "goal", "plan"):
+        run_mode = "auto"
+
     run = agent_service.create_run(
         db,
         user_id=user.id,
@@ -155,6 +164,7 @@ async def run_agent_stream(
         model=data.model,
         provider_id=data.provider_id,
         conversation_id=data.conversation_id,
+        mode=run_mode,
     )
     run_id = run.id
     user_id = user.id
@@ -165,6 +175,7 @@ async def run_agent_stream(
         tool_mode = "auto"
     tool_names = [t for t in (data.tool_names or []) if t] or None
     skill_auto = bool(data.skill_auto) and not data.skill_id
+    team_agent_ids = [a for a in (data.team_agent_ids or []) if a] or None
 
     # If the request explicitly enables sub-agents (ad-hoc, no agent template), set it
     # on a transient agent definition by attaching an inline coordinator agent.
@@ -185,6 +196,56 @@ async def run_agent_stream(
             async for evt in agent_service.run_agent(
                 run_id, user_id,
                 tool_mode=tool_mode, tool_names=tool_names, skill_auto=skill_auto,
+                mode=run_mode, team_agent_ids=team_agent_ids,
+            ):
+                yield f"data: {json.dumps(evt)}\n\n"
+        except Exception as exc:  # noqa: BLE001
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/runs/{run_id}/continue")
+async def continue_run_stream(
+    run_id: UUID,
+    data: AgentRunContinue,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    """Continue an existing run with a follow-up message; streams new steps as SSE."""
+    user = get_current_user(db, credentials.credentials)
+
+    run = db.query(AgentRun).filter(AgentRun.id == run_id, AgentRun.user_id == user.id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not (data.message or "").strip():
+        raise HTTPException(status_code=400, detail="A message is required to continue a run")
+
+    user_id = user.id
+
+    # Mode: keep the run's existing mode unless the follow-up overrides it.
+    run_mode = (data.mode or run.mode or "auto").lower()
+    if run_mode not in ("auto", "goal", "plan"):
+        run_mode = "auto"
+
+    tool_mode = (data.tool_mode or "auto").lower()
+    if tool_mode not in ("off", "auto", "always"):
+        tool_mode = "auto"
+    tool_names = [t for t in (data.tool_names or []) if t] or None
+    team_agent_ids = [a for a in (data.team_agent_ids or []) if a] or None
+    message = data.message
+
+    async def generate():
+        try:
+            async for evt in agent_service.run_agent(
+                run_id, user_id,
+                tool_mode=tool_mode, tool_names=tool_names,
+                mode=run_mode, team_agent_ids=team_agent_ids,
+                continue_message=message,
             ):
                 yield f"data: {json.dumps(evt)}\n\n"
         except Exception as exc:  # noqa: BLE001

@@ -99,12 +99,22 @@ class AgentRunCreate(BaseModel):
     agent_id: Optional[UUID] = None
     skill_id: Optional[UUID] = None
     skill_auto: bool = False  # let the agent adopt the most relevant skill itself
+    mode: Optional[str] = None  # "auto" | "goal" (autonomous until done) | "plan"
     model: Optional[str] = None
     provider_id: Optional[UUID] = None
     conversation_id: Optional[UUID] = None
     allow_subagents: Optional[bool] = None
+    team_agent_ids: Optional[List[UUID]] = None  # saved agents the coordinator may delegate to
     tool_mode: Optional[str] = None  # "off" | "auto" | "always"; default auto
     tool_names: Optional[List[str]] = None  # restrict to these tools; None/[] = all
+
+
+class AgentRunContinue(BaseModel):
+    message: str
+    mode: Optional[str] = None
+    tool_mode: Optional[str] = None
+    tool_names: Optional[List[str]] = None
+    team_agent_ids: Optional[List[UUID]] = None
 
 
 class AgentStepResponse(BaseModel):
@@ -124,6 +134,7 @@ class AgentRunResponse(BaseModel):
     id: UUID
     goal: str
     role: Optional[str]
+    mode: Optional[str] = None
     status: str
     result: Optional[str]
     error: Optional[str]

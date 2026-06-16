@@ -20,6 +20,7 @@ class AgentRun(Base):
 
     goal = Column(Text, nullable=False)
     role = Column(String, nullable=True)  # label for sub-agents (e.g. "Research Agent")
+    mode = Column(String, default="auto")  # auto | goal (autonomous until done) | plan
     status = Column(String, default="pending")  # pending | running | completed | failed | stopped
     result = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
