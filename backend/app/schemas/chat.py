@@ -11,7 +11,9 @@ class ChatRequest(BaseModel):
     attachment_ids: Optional[List[UUID]] = None
     use_tools: bool = False
     tool_mode: Optional[str] = None  # "off" | "auto" | "always"; falls back to use_tools
+    tool_names: Optional[List[str]] = None  # restrict to these tools; None/[] = all available
     skill_id: Optional[UUID] = None
+    skill_auto: bool = False  # when true (and no explicit skill_id), let the model adopt the most relevant skill
 
 
 class ProviderConfigRequest(BaseModel):

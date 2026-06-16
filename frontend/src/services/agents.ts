@@ -114,8 +114,11 @@ export interface RunAgentParams {
   provider_id?: string | null;
   agent_id?: string | null;
   skill_id?: string | null;
+  skill_auto?: boolean;
   conversation_id?: string | null;
   allow_subagents?: boolean;
+  tool_mode?: 'off' | 'auto' | 'always';
+  tool_names?: string[] | null;
 }
 
 /** Start an agent run and stream events over SSE. Returns an AbortController. */

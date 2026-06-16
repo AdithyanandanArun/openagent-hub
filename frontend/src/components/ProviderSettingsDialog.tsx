@@ -381,12 +381,12 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-2xl shadow-2xl flex overflow-hidden"
-        style={{ height: '520px' }}
+        className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-4xl shadow-2xl flex overflow-hidden"
+        style={{ height: 'min(88vh, 720px)' }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Sidebar */}
-        <div className="w-48 bg-zinc-950/60 border-r border-zinc-800 flex flex-col p-3 flex-shrink-0">
+        <div className="w-56 bg-zinc-950/60 border-r border-zinc-800 flex flex-col p-3 flex-shrink-0">
           <p className="text-xs font-semibold text-zinc-500 uppercase tracking-widest px-2 py-2 mb-1">Settings</p>
           <nav className="flex flex-col gap-0.5 flex-1">
             {TABS.map((tab) => (
@@ -407,7 +407,7 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
             <h2 className="text-sm font-semibold text-white">{TABS.find((t) => t.id === activeTab)?.label}</h2>
             <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors"><X size={15} /></button>
           </div>
-          <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="flex-1 overflow-y-auto px-7 py-6">
             {activeTab === 'general' && <GeneralTab />}
             {activeTab === 'providers' && <ProvidersTab onProvidersChange={onProvidersChange} />}
             {activeTab === 'memory' && <MemoryTab />}

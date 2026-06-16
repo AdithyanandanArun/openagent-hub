@@ -210,3 +210,30 @@ def delete_skill(db: Session, user_id: UUID, skill_id: UUID) -> None:
         raise HTTPException(status_code=400, detail="Built-in skills cannot be deleted")
     db.delete(s)
     db.commit()
+
+
+def build_auto_skill_prompt(db: Session, user_id: UUID) -> str | None:
+    """Build a system-prompt block that lets the model adopt the most relevant
+    skill on its own, when the user picked "Auto" instead of a specific skill.
+
+    We list each skill's name + a one-line summary of its approach so the model
+    can silently apply the matching skill's methodology. This avoids a second
+    round-trip while still giving the model the skill instructions to follow.
+    """
+    skills = list_skills(db, user_id)
+    if not skills:
+        return None
+    lines = [
+        "## Skills (Auto)",
+        "You have access to the specialized skills below. If the user's request clearly "
+        "matches one, silently adopt that skill's expertise and methodology for your "
+        "response. If none clearly applies, just answer normally. Do not announce which "
+        "skill you picked.",
+        "",
+    ]
+    for s in skills:
+        summary = (s.description or s.instructions or "").strip().replace("\n", " ")
+        if len(summary) > 220:
+            summary = summary[:217] + "…"
+        lines.append(f"- **{s.name}** — {summary}")
+    return "\n".join(lines)

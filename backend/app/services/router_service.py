@@ -102,6 +102,7 @@ async def route_completion(
     tools: list[dict] | None = None,
     preferred_provider_id: str | None = None,
     temperature: float = 0.4,
+    tool_choice: str = "auto",
 ) -> tuple[dict, Provider]:
     """Non-streaming completion with priority routing + failover.
 
@@ -124,6 +125,7 @@ async def route_completion(
                 messages=messages,
                 tools=tools,
                 temperature=temperature,
+                tool_choice=tool_choice,
             )
             return message, provider
         except httpx.HTTPStatusError as exc:

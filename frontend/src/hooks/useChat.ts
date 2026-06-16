@@ -65,7 +65,7 @@ export function useChat() {
       model: string | null,
       attachmentIds?: string[],
       providerId?: string | null,
-      opts?: { useTools?: boolean; toolMode?: 'off' | 'auto' | 'always'; skillId?: string | null },
+      opts?: { useTools?: boolean; toolMode?: 'off' | 'auto' | 'always'; toolNames?: string[] | null; skillId?: string | null; skillAuto?: boolean },
     ) => {
       const token = localStorage.getItem('token');
       if (!token) return;
@@ -132,7 +132,9 @@ export function useChat() {
         {
           useTools: opts?.useTools,
           toolMode: opts?.toolMode,
+          toolNames: opts?.toolNames,
           skillId: opts?.skillId,
+          skillAuto: opts?.skillAuto,
           onToolCall: (tool, input) => setStreamingTools((p) => [...p, { tool, input }]),
           onToolResult: (tool, output) =>
             setStreamingTools((p) => {

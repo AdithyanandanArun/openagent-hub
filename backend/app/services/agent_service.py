@@ -119,10 +119,11 @@ def _safe_config_model(db, user_id: UUID) -> str | None:
         return None
 
 
-async def _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id):
+async def _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice="auto"):
     if use_router:
         message, _provider = await route_completion(
-            db, user_id, model, messages, tools=tools, preferred_provider_id=preferred_provider_id
+            db, user_id, model, messages, tools=tools,
+            preferred_provider_id=preferred_provider_id, tool_choice=tool_choice,
         )
         return message
     cfg = get_provider_config(db, user_id)
@@ -132,23 +133,35 @@ async def _complete_once(db, user_id, model, messages, tools, use_router, prefer
         model=model or cfg.model,
         messages=messages,
         tools=tools,
+        tool_choice=tool_choice,
     )
 
 
-async def _complete(db, user_id, model, messages, tools, use_router, preferred_provider_id):
+async def _complete(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice="auto"):
     """One LLM completion with a single retry on transient upstream failures.
 
     Providers occasionally return transient 4xx/5xx (e.g. upstream routing hiccups);
     a single retry meaningfully improves sub-agent reliability without masking real errors."""
     try:
-        return await _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id)
+        return await _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice)
     except Exception:  # noqa: BLE001
         await asyncio.sleep(0.6)
-        return await _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id)
+        return await _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice)
 
 
-async def run_agent(run_id: UUID, user_id: UUID):
-    """Execute a run to completion, yielding SSE event dicts. The caller serialises them."""
+async def run_agent(
+    run_id: UUID,
+    user_id: UUID,
+    tool_mode: str = "auto",
+    tool_names: list[str] | None = None,
+    skill_auto: bool = False,
+):
+    """Execute a run to completion, yielding SSE event dicts. The caller serialises them.
+
+    `tool_mode`  : "off" (no tools) | "auto" (default) | "always" (force a tool call first).
+    `tool_names` : optional whitelist; combined with any skill restriction (intersection).
+    `skill_auto` : when no skill is set, list available skills and let the agent adopt one.
+    """
     with SessionLocal() as db:
         run = db.query(AgentRun).filter(AgentRun.id == run_id, AgentRun.user_id == user_id).first()
         if not run:
@@ -192,6 +205,25 @@ async def run_agent(run_id: UUID, user_id: UUID):
                     allowed_tools = skill.tool_names or None
                 except Exception:  # noqa: BLE001
                     pass
+            elif skill_auto:
+                # "Auto" skill: let the agent adopt the most relevant skill itself.
+                from app.services.skill_service import build_auto_skill_prompt
+                try:
+                    auto_block = build_auto_skill_prompt(db, user_id)
+                    if auto_block:
+                        system_prompt = f"{system_prompt}\n\n{auto_block}"
+                except Exception:  # noqa: BLE001
+                    pass
+
+            # Combine the user-picked tool whitelist with any skill restriction.
+            # If both exist, intersect; None/empty means "all available tools".
+            if tool_names:
+                picked = [t for t in tool_names if t]
+                if allowed_tools:
+                    allowed_set = set(allowed_tools)
+                    allowed_tools = [t for t in picked if t in allowed_set]
+                else:
+                    allowed_tools = picked
 
             if conversation_id:
                 from app.models.conversation import Conversation
@@ -222,6 +254,9 @@ async def run_agent(run_id: UUID, user_id: UUID):
             registry = agent_tools.build_registry(
                 db, user_id, allow_subagents=allow_subagents, allowed_tool_names=allowed_tools
             )
+            # tool_mode "off" runs the agent with no tools at all.
+            if tool_mode == "off":
+                registry = {}
             openai_tools = agent_tools.to_openai_tools(registry) if registry else None
 
             ctx = agent_tools.ToolContext(
@@ -259,10 +294,17 @@ async def run_agent(run_id: UUID, user_id: UUID):
 
         try:
             for iteration in range(MAX_ITERATIONS):
+                # "always" forces a tool call on the first iteration (when tools exist);
+                # subsequent iterations use "auto" so the agent can produce a final answer.
+                tool_choice = "required" if (tool_mode == "always" and iteration == 0 and openai_tools) else "auto"
                 message = await _complete(
-                    db, user_id, model, messages, openai_tools, use_router, provider_pref
+                    db, user_id, model, messages, openai_tools, use_router, provider_pref, tool_choice
                 )
                 tool_calls = message.get("tool_calls") or []
+                # Backfill missing/duplicate tool_call ids so the assistant message
+                # and its tool results reference the same valid id (strict providers
+                # 400 otherwise — common with the GitHub MCP's parallel calls).
+                agent_tools.ensure_tool_call_ids(tool_calls)
                 content = message.get("content")
 
                 # Append assistant message to the running transcript

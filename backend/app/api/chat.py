@@ -134,6 +134,15 @@ async def chat_stream(
             allowed_tool_names = skill.tool_names or None
         except Exception:
             pass
+    elif request.skill_auto:
+        # "Auto" skill mode: let the model adopt the most relevant skill itself.
+        from app.services.skill_service import build_auto_skill_prompt
+        try:
+            auto_block = build_auto_skill_prompt(db, user.id)
+            if auto_block:
+                system_prompt = f"{system_prompt}\n\n{auto_block}"
+        except Exception:
+            pass
 
     messages = [{"role": "system", "content": system_prompt}]
     messages += [{"role": m.role, "content": m.content} for m in conv.messages]
@@ -155,6 +164,17 @@ async def chat_stream(
     if tool_mode not in ("off", "auto", "always"):
         tool_mode = "auto"
     use_tools = tool_mode != "off"
+
+    # Resolve the tool whitelist. A skill may restrict tools; the user may also
+    # explicitly pick a subset in the UI. If both are present, intersect them so
+    # neither can broaden the other. None/empty means "all available tools".
+    if request.tool_names:
+        picked = [t for t in request.tool_names if t]
+        if allowed_tool_names:
+            allowed_set = set(allowed_tool_names)
+            allowed_tool_names = [t for t in picked if t in allowed_set]
+        else:
+            allowed_tool_names = picked
 
     async def generate():
         full_response = ""

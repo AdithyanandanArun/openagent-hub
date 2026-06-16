@@ -348,71 +348,79 @@ Provide visibility into platform behavior.
 
 # Development Roadmap
 
-## Phase 1
+The full plan lives in `Implementaion.md`. Current status (as of 2026-06-16): Phases 1–9 complete, Phases 10–12 planned.
 
-Current foundation:
+## Phase 1 — Foundation ✅ Complete
 
-* Authentication
-* Conversations
-* Persistence
-* Streaming chat
-* OpenAI-compatible providers
+* Authentication (JWT register/login/logout)
+* Conversations & persistence
+* Streaming chat, markdown rendering
+* OpenAI-compatible provider
 
-## Phase 2
+## Phase 2 — Production Chat Experience ✅ Complete
 
-Provider abstraction layer.
+* File / image / PDF attachments
+* Message editing, regeneration, copy, search
+* Projects
+* Theme & settings
+
+## Phase 3 — Multi-Provider Support ✅ Complete
 
 * Provider registry
 * Multiple providers
-* Dynamic models
+* Dynamic model fetching
+* Provider test / enable / disable
 
-## Phase 3
+## Phase 4 — Unified Model Layer ✅ Complete
 
-Intelligent routing.
+* Normalized model catalog
+* Capability metadata (context window, vision, reasoning, coding/speed scores)
 
-* Failover
-* Routing profiles
-* Usage tracking
-* Reliability metrics
-
-## Phase 4
-
-Memory system.
+## Phase 5 — Memory System ✅ Complete
 
 * User memory
 * Project memory
-* Agent memory
+* Conversation memory
 
-## Phase 5
+## Phase 6 — Agent Framework ✅ Complete
 
-Agent framework.
-
-* Agent execution
+* Agent runtime / ReAct execution
 * Task planning
 * Tool calling
 
-## Phase 6
-
-MCP integration.
+## Phase 7 — MCP Integration ✅ Complete
 
 * MCP registry
-* Dynamic MCP loading
+* Dynamic MCP server loading & tool discovery
+* Tool permissions
 
-## Phase 7
-
-Multi-agent orchestration.
+## Phase 8 — Multi-Agent System ✅ Complete
 
 * Sub-agents
 * Parallel execution
 * Shared memory
 
-## Phase 8
+## Phase 9 — Skills System ✅ Complete
 
-AI Operating System.
+* Reusable, composable skills
+* Built-in + custom skills
 
-* Unified workspace
-* Unified intelligence layer
-* Fully autonomous workflows
+## Phase 10 — Intelligent Routing ⏳ Planned
+
+* Provider health & usage tracking
+* Routing profiles (Smart / Fast / Coding / Reasoning / Budget)
+* Automatic provider selection
+
+## Phase 11 — Automatic Failover ⏳ Planned
+
+* Fallback chains
+* Retry / recovery logic
+
+## Phase 12 — Unified AI Operating System ⏳ Planned
+
+* Unified API (`/v1/chat/completions`)
+* Unified quota pooling
+* Provider intelligence & developer platform
 
 ---
 

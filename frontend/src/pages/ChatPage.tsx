@@ -12,6 +12,7 @@ import { useProviderSettings } from '../hooks/useProviderSettings';
 import { useProviders } from '../hooks/useProviders';
 import { useCatalog } from '../hooks/useCatalog';
 import { useSkills } from '../hooks/useSkills';
+import { useAgentTools } from '../hooks/useAgentTools';
 import { User } from '../services/auth';
 import { ProviderConfig } from '../services/chat';
 
@@ -44,6 +45,7 @@ export function ChatPage({ user, onLogout }: Props) {
   const { providerModels, refreshModels } = useProviders();
   const { catalog, sync: syncCatalog } = useCatalog();
   const { skills } = useSkills();
+  const { tools } = useAgentTools();
 
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
@@ -70,7 +72,7 @@ export function ChatPage({ user, onLogout }: Props) {
   const handleSend = (
     message: string,
     attachmentIds: string[],
-    opts?: { useTools?: boolean; toolMode?: 'off' | 'auto' | 'always'; skillId?: string | null },
+    opts?: { useTools?: boolean; toolMode?: 'off' | 'auto' | 'always'; toolNames?: string[]; skillId?: string | null; skillAuto?: boolean },
   ) => {
     setThinkingLabel(attachmentIds.length > 0 ? 'Analysing' : 'Thinking');
     sendMessage(
@@ -93,7 +95,20 @@ export function ChatPage({ user, onLogout }: Props) {
     syncCatalog();
   };
 
+  // Selecting a conversation or starting a new chat should always land the user
+  // in the Chat view, even if they were on the Agents tab.
+  const handleSelectConversation = (id: string) => {
+    setView('chat');
+    selectConversation(id);
+  };
+
+  const handleNewChat = () => {
+    setView('chat');
+    startNewChat();
+  };
+
   const handleSelectProject = (id: string | null) => {
+    setView('chat');
     setSelectedProjectId(id);
     startNewChat();
   };
@@ -111,8 +126,8 @@ export function ChatPage({ user, onLogout }: Props) {
       <Sidebar
         conversations={conversations}
         currentId={currentConversation?.id}
-        onSelect={selectConversation}
-        onNew={startNewChat}
+        onSelect={handleSelectConversation}
+        onNew={handleNewChat}
         onDelete={deleteConversation}
         onRename={renameConversation}
         projects={projects}
@@ -167,11 +182,17 @@ export function ChatPage({ user, onLogout }: Props) {
               providerModels={hasProviderModels ? providerModels : undefined}
               catalog={catalog}
               skills={skills}
+              tools={tools}
               onModelChange={handleModelChange}
             />
           </>
         ) : (
-          <AgentsView providerModels={providerModels} fallbackModel={selectedModel || config?.model || ''} catalog={catalog} />
+          <AgentsView
+            providerModels={providerModels}
+            fallbackModel={selectedModel || config?.model || ''}
+            catalog={catalog}
+            availableModels={availableModels}
+          />
         )}
       </div>
 

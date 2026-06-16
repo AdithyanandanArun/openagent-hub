@@ -313,3 +313,45 @@ def parse_tool_arguments(raw: Any) -> dict:
         return parsed if isinstance(parsed, dict) else {}
     except (json.JSONDecodeError, TypeError):
         return {}
+
+
+def ensure_tool_call_ids(tool_calls: list[dict]) -> list[dict]:
+    """Normalize a model's tool_calls so the follow-up request can never be rejected.
+
+    This guards against the ways flaky OpenAI-compatible providers (especially those
+    serving open-source models) emit malformed tool_calls — for ANY tool, built-in or
+    MCP, not just GitHub. On the next turn each `tool` result is paired with its
+    `tool_call_id`; if ids are blank/duplicated, or the function shape is malformed,
+    strict providers 400 on the whole request and the turn errors out. We make the
+    list well-formed in place:
+
+      * every call gets a unique, non-empty `id` (backfilled as call_<i>)
+      * `type` defaults to "function"
+      * `function.arguments` is coerced to a JSON string ("{}" when missing), since
+        some providers send it as null/dict and others reject anything but a string
+    """
+    seen: set[str] = set()
+    for i, call in enumerate(tool_calls or []):
+        if not isinstance(call, dict):
+            continue
+        cid = (call.get("id") or "").strip()
+        if not cid or cid in seen:
+            cid = f"call_{i}"
+            while cid in seen:
+                cid = f"{cid}_"
+            call["id"] = cid
+        seen.add(call["id"])
+
+        call.setdefault("type", "function")
+        fn = call.get("function")
+        if not isinstance(fn, dict):
+            fn = {}
+            call["function"] = fn
+        args = fn.get("arguments")
+        if args is None:
+            fn["arguments"] = "{}"
+        elif isinstance(args, dict):
+            fn["arguments"] = json.dumps(args)
+        elif not isinstance(args, str):
+            fn["arguments"] = str(args)
+    return tool_calls

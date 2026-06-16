@@ -197,8 +197,20 @@ export function MCPTab() {
   const [resolving, setResolving] = useState(false);
   const [pasteError, setPasteError] = useState<string | null>(null);
 
-  const installedCommands = new Set(servers.map((s) => `${s.command} ${(s.args ?? []).join(' ')}`.trim()));
-  const isInstalled = (e: CatalogEntry) => installedCommands.has(`${e.command} ${e.args.join(' ')}`.trim());
+  // A catalog entry counts as installed when a registered server runs the same
+  // command and carries all of the entry's *fixed* args. We ignore "{{TOKEN}}"
+  // placeholder args (e.g. filesystem's {{ROOT_PATH}}, git's {{REPO_PATH}}) because
+  // those get filled with a concrete value at install time and would otherwise
+  // never match the catalog's placeholder form.
+  const isPlaceholder = (a: string) => /\{\{\w+\}\}/.test(a);
+  const isInstalled = (e: CatalogEntry) => {
+    const need = e.args.filter((a) => !isPlaceholder(a));
+    return servers.some((s) => {
+      if ((s.command || '') !== e.command) return false;
+      const have = s.args ?? [];
+      return need.every((a) => have.includes(a));
+    });
+  };
 
   const openCatalogInstall = (e: CatalogEntry) => {
     setPending({

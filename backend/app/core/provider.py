@@ -51,6 +51,7 @@ async def chat_completion(
     tools: list[dict] | None = None,
     temperature: float = 0.4,
     timeout: float = 120.0,
+    tool_choice: str = "auto",
 ) -> dict:
     """Non-streaming chat completion. Returns the assistant message dict
     (which may contain `content` and/or `tool_calls`). Used by the agent runtime."""
@@ -66,7 +67,7 @@ async def chat_completion(
     }
     if tools:
         payload["tools"] = tools
-        payload["tool_choice"] = "auto"
+        payload["tool_choice"] = tool_choice
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(

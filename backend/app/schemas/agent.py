@@ -98,10 +98,13 @@ class AgentRunCreate(BaseModel):
     goal: str
     agent_id: Optional[UUID] = None
     skill_id: Optional[UUID] = None
+    skill_auto: bool = False  # let the agent adopt the most relevant skill itself
     model: Optional[str] = None
     provider_id: Optional[UUID] = None
     conversation_id: Optional[UUID] = None
     allow_subagents: Optional[bool] = None
+    tool_mode: Optional[str] = None  # "off" | "auto" | "always"; default auto
+    tool_names: Optional[List[str]] = None  # restrict to these tools; None/[] = all
 
 
 class AgentStepResponse(BaseModel):

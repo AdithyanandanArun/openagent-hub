@@ -1,19 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bot, Sparkles, Users, Send, Square, History, ChevronDown, Trash2 } from 'lucide-react';
+import { Bot, Users, Send, Square, History, ChevronDown, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAgents } from '../hooks/useAgents';
 import { useSkills } from '../hooks/useSkills';
+import { useAgentTools } from '../hooks/useAgentTools';
 import { getRun, AgentRunDetail } from '../services/agents';
 import { ProviderModel } from '../hooks/useProviders';
 import { CatalogModel } from '../services/catalog';
 import { StepTimeline } from './StepTimeline';
 import { MarkdownContent } from './MarkdownContent';
+import { ToolPicker, ToolMode } from './ToolPicker';
+import { SkillPicker } from './SkillPicker';
 import { LiveStep } from '../hooks/useAgents';
 
 interface Props {
   providerModels: ProviderModel[];
   fallbackModel: string;
   catalog?: CatalogModel[];
+  availableModels?: string[];
 }
 
 // Models agents need tool-calling. Prefer known tool-capable families and avoid
@@ -50,13 +54,16 @@ function statusColor(status: string) {
   return 'text-zinc-500';
 }
 
-export function AgentsView({ providerModels, fallbackModel, catalog }: Props) {
+export function AgentsView({ providerModels, fallbackModel, catalog, availableModels }: Props) {
   const { runs, liveSteps, isRunning, runError, finalAnswer, start, stop, loadRuns, removeRun, clearAllRuns } = useAgents();
   const { skills } = useSkills();
+  const { tools } = useAgentTools();
 
-  // Live provider models are the freshest source, but the live fetch can be slow
-  // or fail; fall back to the DB-cached catalog (same source chat uses) so the
-  // model list is never empty when providers exist.
+  // Resolve the model list through the SAME fallback chain chat uses, so the
+  // picker is never empty when a model is configured anywhere:
+  //   live provider models → DB catalog → single-config models → the one
+  //   selected/configured model (covers users on the single-provider config
+  //   whose multi-providers are disabled and whose catalog is therefore empty).
   const effectiveModels: ProviderModel[] = useMemo(() => {
     if (providerModels.length > 0) return providerModels;
     if (catalog && catalog.length > 0) {
@@ -64,11 +71,19 @@ export function AgentsView({ providerModels, fallbackModel, catalog }: Props) {
         .filter((c) => c.is_enabled)
         .map((c) => ({ provider_id: c.provider_id, provider_name: c.provider_name, model: c.model_id }));
     }
+    if (availableModels && availableModels.length > 0) {
+      return availableModels.map((m) => ({ provider_id: '', provider_name: 'Configured provider', model: m }));
+    }
+    if (fallbackModel) {
+      return [{ provider_id: '', provider_name: 'Configured provider', model: fallbackModel }];
+    }
     return [];
-  }, [providerModels, catalog]);
+  }, [providerModels, catalog, availableModels, fallbackModel]);
 
   const [goal, setGoal] = useState('');
-  const [skillId, setSkillId] = useState<string>('');
+  const [skillId, setSkillId] = useState<string>('auto');
+  const [toolMode, setToolMode] = useState<ToolMode>('auto');
+  const [toolNames, setToolNames] = useState<string[]>([]);
   const [allowSub, setAllowSub] = useState(false);
   const [selected, setSelected] = useState<{ model: string; providerId: string | null }>({
     model: fallbackModel,
@@ -104,8 +119,11 @@ export function AgentsView({ providerModels, fallbackModel, catalog }: Props) {
     start({
       goal: g,
       model: selected.model || null,
-      provider_id: selected.providerId,
-      skill_id: skillId || null,
+      provider_id: selected.providerId || null,
+      skill_id: skillId === 'auto' || skillId === '' ? null : skillId,
+      skill_auto: skillId === 'auto',
+      tool_mode: toolMode,
+      tool_names: toolNames,
       allow_subagents: allowSub,
     });
   };
@@ -154,19 +172,18 @@ export function AgentsView({ providerModels, fallbackModel, catalog }: Props) {
             />
 
             <div className="flex items-center gap-2 flex-wrap">
-              {/* Skill selector */}
-              <div className="relative">
-                <select
-                  value={skillId}
-                  onChange={(e) => setSkillId(e.target.value)}
-                  className="appearance-none bg-zinc-800 border border-zinc-700 rounded-lg pl-7 pr-7 py-1.5 text-xs text-zinc-300 outline-none focus:border-zinc-500 cursor-pointer"
-                >
-                  <option value="">No skill</option>
-                  {skills.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-                <Sparkles size={12} className="absolute left-2 top-2 text-purple-400 pointer-events-none" />
-                <ChevronDown size={12} className="absolute right-2 top-2 text-zinc-500 pointer-events-none" />
-              </div>
+              {/* Skill selector — same control as the chat tab */}
+              <SkillPicker value={skillId} onChange={setSkillId} skills={skills} placement="down" />
+
+              {/* Tools: Off / Auto / Always + optional per-tool restriction */}
+              <ToolPicker
+                mode={toolMode}
+                onMode={setToolMode}
+                selected={toolNames}
+                onSelected={setToolNames}
+                tools={tools}
+                placement="down"
+              />
 
               {/* Model selector */}
               <div className="relative">

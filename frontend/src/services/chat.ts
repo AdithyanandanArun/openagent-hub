@@ -90,7 +90,9 @@ export function streamChat(
   options?: {
     useTools?: boolean;
     toolMode?: 'off' | 'auto' | 'always';
+    toolNames?: string[] | null;
     skillId?: string | null;
+    skillAuto?: boolean;
     onToolCall?: (tool: string, input: any) => void;
     onToolResult?: (tool: string, output: string) => void;
   },
@@ -111,7 +113,9 @@ export function streamChat(
       provider_id: providerId ?? null,
       use_tools: options?.useTools ?? false,
       tool_mode: options?.toolMode ?? null,
+      tool_names: options?.toolNames ?? null,
       skill_id: options?.skillId ?? null,
+      skill_auto: options?.skillAuto ?? false,
     }),
     signal: controller.signal,
   })

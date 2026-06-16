@@ -159,6 +159,13 @@ async def run_agent_stream(
     run_id = run.id
     user_id = user.id
 
+    # Normalize tool behaviour.
+    tool_mode = (data.tool_mode or "auto").lower()
+    if tool_mode not in ("off", "auto", "always"):
+        tool_mode = "auto"
+    tool_names = [t for t in (data.tool_names or []) if t] or None
+    skill_auto = bool(data.skill_auto) and not data.skill_id
+
     # If the request explicitly enables sub-agents (ad-hoc, no agent template), set it
     # on a transient agent definition by attaching an inline coordinator agent.
     if allow_override and not data.agent_id:
@@ -175,7 +182,10 @@ async def run_agent_stream(
 
     async def generate():
         try:
-            async for evt in agent_service.run_agent(run_id, user_id):
+            async for evt in agent_service.run_agent(
+                run_id, user_id,
+                tool_mode=tool_mode, tool_names=tool_names, skill_auto=skill_auto,
+            ):
                 yield f"data: {json.dumps(evt)}\n\n"
         except Exception as exc:  # noqa: BLE001
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"

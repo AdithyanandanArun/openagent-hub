@@ -172,6 +172,9 @@ async def stream_chat_with_tools(
                 yield evt
 
             tool_calls = message.get("tool_calls") or []
+            # Backfill any missing/duplicate tool_call ids before they are sent back
+            # to the provider, otherwise strict providers 400 on the next turn.
+            agent_tools.ensure_tool_call_ids(tool_calls)
             working.append(message)
 
             if not tool_calls:
