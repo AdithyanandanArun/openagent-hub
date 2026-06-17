@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from uuid import UUID
@@ -94,8 +95,27 @@ async def chat_stream(
                             user_content = f"[PDF: {att.filename} — no extractable text (scanned/image-only)]\n\n{user_content}"
                     except Exception:
                         user_content = f"[PDF: {att.filename} — could not extract text]\n\n{user_content}"
+                elif att.content_type.startswith("image/"):
+                    pass  # handled below when building the message content array
                 else:
                     user_content = f"[Attachment: {att.filename} ({att.content_type})]\n\n{user_content}"
+
+    # Build multipart content for images (OpenAI vision format)
+    image_parts = []
+    for att in attachment_refs:
+        if att.content_type.startswith("image/"):
+            try:
+                file_size = os.path.getsize(att.file_path)
+                if file_size > 10 * 1024 * 1024:
+                    continue
+                with open(att.file_path, "rb") as img_f:
+                    b64 = base64.b64encode(img_f.read()).decode("utf-8")
+                image_parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{att.content_type};base64,{b64}"},
+                })
+            except Exception:
+                pass
 
     # Save the original message (no file content) so the UI shows clean text
     user_msg = add_message(db, conv.id, "user", request.message)
@@ -147,9 +167,14 @@ async def chat_stream(
 
     messages = [{"role": "system", "content": system_prompt}]
     messages += [{"role": m.role, "content": m.content} for m in conv.messages]
-    # user_content already added to DB; use it as the last message content
+    # user_content already added to DB; use it as the last message content.
+    # When images are attached, use the OpenAI multi-part content format so
+    # vision-capable models can actually see the image data.
     if messages:
-        messages[-1]["content"] = user_content
+        if image_parts:
+            messages[-1]["content"] = image_parts + [{"type": "text", "text": user_content}]
+        else:
+            messages[-1]["content"] = user_content
 
     # Extract all primitives before the DI session closes
     from app.core import crypto

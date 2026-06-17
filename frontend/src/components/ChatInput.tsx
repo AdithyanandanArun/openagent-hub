@@ -250,6 +250,26 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
     }
   };
 
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(e.clipboardData.items);
+    const imageFiles = items
+      .filter((item) => item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((f): f is File => f !== null);
+    if (!imageFiles.length) return;
+    e.preventDefault();
+    const token = localStorage.getItem('token') || '';
+    setUploading(true);
+    try {
+      const uploaded = await Promise.all(imageFiles.map((f) => uploadAttachment(f, token)));
+      setAttachments((prev) => [...prev, ...uploaded]);
+    } catch (err) {
+      console.error('Paste upload failed:', err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const canSend = !isStreaming && !disabled && !uploading && (value.trim().length > 0 || attachments.length > 0);
 
   return (
@@ -276,6 +296,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onInput={handleInput}
+            onPaste={handlePaste}
             placeholder={disabled ? 'Configure your provider in Settings first...' : 'Message OpenAgent Hub…  (/ for commands)'}
             disabled={disabled && !isStreaming}
             rows={1}
