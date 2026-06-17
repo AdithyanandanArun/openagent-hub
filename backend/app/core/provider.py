@@ -37,7 +37,13 @@ async def stream_chat(
             headers=headers,
             json=payload,
         ) as response:
-            response.raise_for_status()
+            if response.status_code >= 400:
+                body = (await response.aread()).decode("utf-8", "replace")[:500]
+                raise httpx.HTTPStatusError(
+                    f"HTTP {response.status_code}: {body}",
+                    request=response.request,
+                    response=response,
+                )
             async for line in response.aiter_lines():
                 if line.startswith("data: "):
                     data = line[6:]

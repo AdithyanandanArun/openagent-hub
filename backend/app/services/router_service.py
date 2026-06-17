@@ -26,7 +26,7 @@ from app.services import key_service
 FAILURE_THRESHOLD = 3
 BASE_COOLDOWN_SECONDS = 60
 MAX_COOLDOWN_SECONDS = 600
-RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+RETRYABLE_STATUS_CODES = {408, 413, 429, 500, 502, 503, 504}
 
 
 def _is_retryable_status(status_code: int) -> bool:
@@ -38,7 +38,7 @@ def _is_retryable_error(exc: Exception) -> bool:
         return _is_retryable_status(exc.response.status_code)
     if isinstance(exc, (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError)):
         return True
-    return True
+    return False
 
 
 def _cooldown_seconds(consecutive_failures: int) -> int:
@@ -66,7 +66,14 @@ def _record_success(db: Session, provider: Provider) -> None:
     db.commit()
 
 
+NON_FAULT_STATUS_CODES = {408, 413}
+
 def _record_failure(db: Session, provider: Provider, error: str, status_code: int | None = None) -> None:
+    if status_code in NON_FAULT_STATUS_CODES:
+        db.add(provider)
+        db.commit()
+        return
+
     provider.consecutive_failures = (provider.consecutive_failures or 0) + 1
     provider.last_error = error[:500] if error else None
     provider.last_error_at = datetime.utcnow()
@@ -159,6 +166,18 @@ def _resolve_attempts(
     return [(model, p) for p in providers]
 
 
+def _filter_vision(db: Session, user_id: UUID, attempts: list[tuple[str, "Provider"]]) -> list[tuple[str, "Provider"]]:
+    from app.models.model_catalog import ModelCatalog
+    vision_models = {
+        r.model_id
+        for r in db.query(ModelCatalog.model_id)
+        .filter(ModelCatalog.user_id == user_id, ModelCatalog.vision_support == True)
+        .all()
+    }
+    filtered = [(m, p) for m, p in attempts if m in vision_models]
+    return filtered if filtered else attempts
+
+
 async def route_chat(
     db: Session,
     user_id: UUID,
@@ -166,8 +185,11 @@ async def route_chat(
     messages: list[dict],
     preferred_provider_id: str | None = None,
     model_order: list[tuple[str, str]] | None = None,
+    has_image: bool = False,
 ) -> AsyncIterator[str]:
     attempts = _resolve_attempts(db, user_id, model, preferred_provider_id, model_order)
+    if has_image:
+        attempts = _filter_vision(db, user_id, attempts)
 
     if not attempts:
         raise RuntimeError("No enabled providers configured.")
@@ -178,8 +200,8 @@ async def route_chat(
             continue
         pk = key_service.pick_key(db, provider)
         api_key = key_service.decrypt_key(pk) if pk else crypto.decrypt(provider.api_key)
+        yielded_any = False
         try:
-            yielded_any = False
             async for chunk in stream_chat(
                 base_url=provider.base_url,
                 api_key=api_key,
@@ -188,18 +210,17 @@ async def route_chat(
             ):
                 yielded_any = True
                 yield chunk
-            if yielded_any or True:
-                _record_success(db, provider)
-                if pk:
-                    key_service.record_usage(db, pk)
-                return
+            _record_success(db, provider)
+            if pk:
+                key_service.record_usage(db, pk)
+            return
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             try:
-                body_text = exc.response.text[:300]
+                body_text = exc.response.text[:300] if exc.response.is_stream_consumed or not exc.response.is_closed else str(exc)[:300]
             except Exception:
-                body_text = "(unreadable)"
-            error_msg = f"Provider '{provider.name}' returned HTTP {status}: {body_text}"
+                body_text = str(exc)[:300]
+            error_msg = f"Provider '{provider.name}' HTTP {status}: {body_text}"
 
             if status == 429 and pk:
                 key_service.set_cooldown(db, pk)
@@ -207,17 +228,16 @@ async def route_chat(
                 key_service.set_error(db, pk, f"HTTP {status}")
 
             _record_failure(db, provider, error_msg, status)
-
-            if not _is_retryable_status(status):
-                raise RuntimeError(error_msg)
+            if yielded_any:
+                return
             last_error = error_msg
         except Exception as exc:
             error_msg = f"Provider '{provider.name}' error: {exc}"
             if pk:
                 key_service.set_error(db, pk, str(exc))
             _record_failure(db, provider, error_msg)
-            if not _is_retryable_error(exc):
-                raise RuntimeError(error_msg)
+            if yielded_any:
+                return
             last_error = error_msg
 
     raise RuntimeError(last_error)
@@ -278,10 +298,10 @@ async def route_completion(
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             try:
-                body_text = exc.response.text[:300]
+                body_text = exc.response.text[:300] if exc.response.is_stream_consumed or not exc.response.is_closed else str(exc)[:300]
             except Exception:
-                body_text = "(unreadable)"
-            error_msg = f"Provider '{provider.name}' returned HTTP {status}: {body_text}"
+                body_text = str(exc)[:300]
+            error_msg = f"Provider '{provider.name}' HTTP {status}: {body_text}"
 
             if status == 429 and pk:
                 key_service.set_cooldown(db, pk)
@@ -289,17 +309,13 @@ async def route_completion(
                 key_service.set_error(db, pk, f"HTTP {status}")
 
             _record_failure(db, provider, error_msg, status)
-
-            if not _is_retryable_status(status):
-                raise RuntimeError(error_msg)
             last_error = error_msg
         except Exception as exc:
             error_msg = f"Provider '{provider.name}' error: {exc}"
             if pk:
                 key_service.set_error(db, pk, str(exc))
             _record_failure(db, provider, error_msg)
-            if not _is_retryable_error(exc):
-                raise RuntimeError(error_msg)
+            last_error = error_msg
             last_error = error_msg
 
     raise RuntimeError(last_error)

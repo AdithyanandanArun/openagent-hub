@@ -475,9 +475,23 @@ async def run_agent(
                 # "always" forces a tool call on the first iteration (when tools exist);
                 # subsequent iterations use "auto" so the agent can produce a final answer.
                 tool_choice = "required" if (tool_mode == "always" and iteration == 0 and openai_tools) else "auto"
-                message = await _complete(
-                    db, user_id, model, messages, openai_tools, use_router, provider_pref, tool_choice, model_order
-                )
+                try:
+                    message = await _complete(
+                        db, user_id, model, messages, openai_tools, use_router, provider_pref, tool_choice, model_order
+                    )
+                except Exception as llm_exc:
+                    error_text = str(llm_exc)
+                    _record_step(db, run_id, step_index, "thought",
+                                 content=f"⚠ LLM error: {error_text[:200]}. Retrying...")
+                    yield {"type": "thought", "content": f"⚠ LLM error, retrying...", "index": step_index}
+                    step_index += 1
+                    await asyncio.sleep(1.0)
+                    try:
+                        message = await _complete(
+                            db, user_id, model, messages, openai_tools, use_router, provider_pref, tool_choice, model_order
+                        )
+                    except Exception as retry_exc:
+                        raise RuntimeError(f"All providers failed after retry: {retry_exc}") from retry_exc
                 tool_calls = message.get("tool_calls") or []
                 # Backfill missing/duplicate tool_call ids so the assistant message
                 # and its tool results reference the same valid id (strict providers

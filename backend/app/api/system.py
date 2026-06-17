@@ -3,6 +3,9 @@
 Provides a single endpoint for the frontend to display the full health picture:
 providers with circuit breaker state, quota gauges, model counts, and failover log.
 """
+import os
+import platform
+import subprocess
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -126,3 +129,19 @@ def failover_log(
         }
         for r in rows
     ]
+
+
+@router.post("/open-workspace")
+def open_workspace(user=Depends(_current_user)):
+    workspace = os.environ.get("WORKSPACE_DIR", os.getcwd())
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            subprocess.Popen(["open", workspace])
+        elif system == "Windows":
+            subprocess.Popen(["explorer", workspace])
+        else:
+            subprocess.Popen(["xdg-open", workspace])
+        return {"path": workspace, "opened": True}
+    except Exception:
+        return {"path": workspace, "opened": False}

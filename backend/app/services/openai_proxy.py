@@ -21,11 +21,11 @@ from app.core import crypto
 from app.models.provider import Provider
 from app.services.router_service import (
     _resolve_attempts,
+    _filter_vision,
     _is_circuit_open,
     _record_success,
     _record_failure,
     _update_quota,
-    _is_retryable_status,
 )
 from app.services.routing_service import is_auto, choose_models
 from app.services import key_service
@@ -54,14 +54,17 @@ def build_attempts(
     messages: list[dict],
     preferred_provider_id: str | None = None,
 ) -> list[tuple[str, Provider]]:
+    has_image = _has_image(messages)
     if is_auto(model):
         ranked = choose_models(
-            db, user_id, messages, _has_image(messages), preferred_provider_id
+            db, user_id, messages, has_image, preferred_provider_id
         )
         model_order = [(mid, pid) for mid, pid, _reason in ranked]
         attempts = _resolve_attempts(db, user_id, "", preferred_provider_id, model_order)
     else:
         attempts = _resolve_attempts(db, user_id, model, preferred_provider_id, None)
+    if has_image:
+        attempts = _filter_vision(db, user_id, attempts)
     return attempts
 
 
@@ -105,8 +108,6 @@ async def completion(
                     else:
                         key_service.set_error(db, pk, f"HTTP {resp.status_code}")
                 _record_failure(db, provider, error_msg, resp.status_code)
-                if not _is_retryable_status(resp.status_code):
-                    raise RuntimeError(error_msg)
                 last_error = error_msg
                 continue
             data = resp.json()
@@ -162,8 +163,6 @@ async def stream(
                             else:
                                 key_service.set_error(db, pk, f"HTTP {resp.status_code}")
                         _record_failure(db, provider, error_msg, resp.status_code)
-                        if not _is_retryable_status(resp.status_code):
-                            raise RuntimeError(error_msg)
                         last_error = error_msg
                         continue
                     _record_success(db, provider)
@@ -217,8 +216,6 @@ async def embeddings(
                     else:
                         key_service.set_error(db, pk, f"HTTP {resp.status_code}")
                 _record_failure(db, provider, error_msg, resp.status_code)
-                if not _is_retryable_status(resp.status_code):
-                    raise RuntimeError(error_msg)
                 last_error = error_msg
                 continue
             data = resp.json()

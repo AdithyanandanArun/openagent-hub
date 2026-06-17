@@ -209,11 +209,11 @@ async def chat_stream(
     from app.models.provider import Provider as ProviderModel
     route_info = None
     model_order = None
+    has_image = any(
+        (a.content_type or "").startswith("image/") for a in attachment_refs
+    )
     if is_auto(model):
         if use_router:
-            has_image = any(
-                (a.content_type or "").startswith("image/") for a in attachment_refs
-            )
             routing_mode = (request.routing_mode or "balanced").lower()
             if routing_mode not in ("speed", "quality", "reliability", "balanced"):
                 routing_mode = "balanced"
@@ -269,7 +269,7 @@ async def chat_stream(
             else:
                 with SessionLocal() as stream_db:
                     if use_router:
-                        chunks = route_chat(stream_db, user_id, model, messages, preferred_provider_id, model_order=model_order)
+                        chunks = route_chat(stream_db, user_id, model, messages, preferred_provider_id, model_order=model_order, has_image=has_image)
                     else:
                         chunks = stream_chat(base_url=base_url, api_key=api_key, model=model, messages=messages)
 

@@ -35,12 +35,16 @@ export function useAgents() {
   // Shared SSE event handler: appends steps and tracks the run id / final answer.
   const onRunEvent = useCallback((evt: RunEvent) => {
     if (evt.run_id) setCurrentRunId(evt.run_id);
+    setRunError(null);
     if (evt.type === 'thought') {
       setLiveSteps((p) => [...p, { type: 'thought', content: evt.content }]);
     } else if (evt.type === 'tool_call') {
       setLiveSteps((p) => [...p, { type: 'tool_call', tool: evt.tool, input: evt.input }]);
     } else if (evt.type === 'tool_result') {
       setLiveSteps((p) => [...p, { type: 'tool_result', tool: evt.tool, output: evt.output }]);
+    } else if (evt.type === 'error') {
+      setRunError(evt.message ?? 'Unknown error');
+      setIsRunning(false);
     } else if (evt.type === 'final') {
       setFinalAnswer(evt.content ?? '');
       setLiveSteps((p) => [...p, { type: 'final', content: evt.content }]);

@@ -178,8 +178,7 @@ function streamSSE(
           try {
             const evt: RunEvent = JSON.parse(line.slice(6));
             onEvent(evt);
-            if (evt.type === 'done') onDone();
-            else if (evt.type === 'error') onError(evt.message ?? 'Unknown error');
+            if (evt.type === 'done') { onDone(); return; }
           } catch {
             // skip malformed lines
           }

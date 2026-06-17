@@ -22,7 +22,7 @@ from app.core import crypto
 from app.core.provider import stream_chat
 from app.services import agent_tools
 from app.services.provider_service import has_enabled_providers
-from app.services.router_service import _ordered_providers, _is_on_cooldown, _set_cooldown, _resolve_attempts
+from app.services.router_service import _ordered_providers, _is_circuit_open, _record_success, _record_failure, _resolve_attempts
 
 MAX_TOOL_ROUNDS = 5
 
@@ -104,28 +104,35 @@ async def _stream_turn_with_failover(db, user_id, model, messages, tools, prefer
     if not attempts:
         raise RuntimeError("No enabled providers configured.")
     last_error = "All providers failed."
+    buffered: list[dict] = []
+
     for attempt_model, provider in attempts:
-        pid = str(provider.id)
-        if _is_on_cooldown(pid):
+        if _is_circuit_open(provider):
             continue
+        buffered.clear()
+
+        async def _buffer_event(evt):
+            buffered.append(evt)
+
         try:
-            return await _stream_one_turn(provider, attempt_model, messages, tools, on_event, tool_choice)
+            result = await _stream_one_turn(provider, attempt_model, messages, tools, _buffer_event, tool_choice)
+            _record_success(db, provider)
+            for evt in buffered:
+                await on_event(evt)
+            return result
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 429:
-                _set_cooldown(pid)
-                provider.status = "rate_limited"
-            else:
-                provider.status = "error"
-            db.commit()
+            status = exc.response.status_code
             try:
-                body_text = exc.response.text[:300]
+                body_text = exc.response.text[:300] if exc.response.is_stream_consumed or not exc.response.is_closed else str(exc)[:300]
             except Exception:
-                body_text = "(unreadable)"
-            last_error = f"Provider '{provider.name}' returned HTTP {exc.response.status_code}: {body_text}"
+                body_text = str(exc)[:300]
+            error_msg = f"Provider '{provider.name}' HTTP {status}: {body_text}"
+            _record_failure(db, provider, error_msg, status)
+            last_error = error_msg
         except Exception as exc:  # noqa: BLE001
-            provider.status = "error"
-            db.commit()
-            last_error = f"Provider '{provider.name}' error: {exc}"
+            error_msg = f"Provider '{provider.name}' error: {exc}"
+            _record_failure(db, provider, error_msg)
+            last_error = error_msg
     raise RuntimeError(last_error)
 
 
