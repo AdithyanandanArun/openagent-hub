@@ -18,6 +18,18 @@ class Provider(Base):
     priority = Column(Integer, default=0)
     status = Column(String, default="unknown")  # healthy / error / unknown / rate_limited
     last_checked_at = Column(DateTime, nullable=True)
+    # Circuit breaker state
+    consecutive_failures = Column(Integer, default=0)
+    circuit_state = Column(String, default="closed")  # closed / open / half_open
+    cooldown_until = Column(DateTime, nullable=True)
+    last_error = Column(String, nullable=True)
+    last_error_at = Column(DateTime, nullable=True)
+    # Quota tracking (from upstream rate-limit headers)
+    rpm_remaining = Column(Integer, nullable=True)
+    tpm_remaining = Column(Integer, nullable=True)
+    rpm_limit = Column(Integer, nullable=True)
+    tpm_limit = Column(Integer, nullable=True)
+    quota_reset_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

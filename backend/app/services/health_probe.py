@@ -2,6 +2,9 @@
 
 Periodically hits each provider's ``/models`` endpoint and updates
 ``Provider.status`` + ``Provider.last_checked_at``.
+
+Phase 11: Also refreshes reliability stats and resets circuit breakers
+for providers that recover.
 """
 from __future__ import annotations
 
@@ -18,11 +21,10 @@ from app.models.provider import Provider
 
 log = logging.getLogger(__name__)
 
-PROBE_INTERVAL = 120  # seconds between health-check rounds
+PROBE_INTERVAL = 120
 
 
 async def _check_one(provider_id, base_url: str, api_key_enc: str) -> tuple[str, str | None]:
-    """Return (status, error_or_None)."""
     try:
         plaintext = crypto.decrypt(api_key_enc)
         headers = {}
@@ -58,9 +60,29 @@ async def _probe_round() -> None:
             else:
                 status, _err = result
                 p.status = status
+                if status == "healthy" and p.circuit_state != "closed":
+                    p.circuit_state = "closed"
+                    p.consecutive_failures = 0
+                    p.cooldown_until = None
             p.last_checked_at = datetime.utcnow()
 
         db.commit()
+
+        # Refresh reliability stats for all users with recent activity
+        try:
+            from app.services.reliability_service import refresh_reliability_stats
+            from app.models.request_log import RequestLog
+            from sqlalchemy import func, distinct
+            from datetime import timedelta
+            cutoff = datetime.utcnow() - timedelta(days=1)
+            user_ids = db.query(distinct(RequestLog.user_id)).filter(
+                RequestLog.created_at >= cutoff
+            ).all()
+            for (uid,) in user_ids:
+                refresh_reliability_stats(db, uid, days=7)
+        except Exception:
+            log.debug("Reliability refresh skipped", exc_info=True)
+
     except Exception:
         log.exception("Health probe round failed")
         db.rollback()

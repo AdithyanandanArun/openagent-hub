@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import (
     auth, conversations, chat, models, projects, attachments, providers, catalog,
     memory, skills, mcp, agents, tokens, openai_compat, provider_keys, analytics,
+    system,
 )
 from app.services.health_probe import run_health_probes
 
@@ -42,6 +43,7 @@ app.include_router(agents.router, prefix="/api")
 app.include_router(tokens.router, prefix="/api")
 app.include_router(provider_keys.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
+app.include_router(system.router, prefix="/api")
 # OpenAI-compatible public API — mounted at /v1 (no /api prefix), token-authed.
 app.include_router(openai_compat.router)
 

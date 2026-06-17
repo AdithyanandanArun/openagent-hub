@@ -5,6 +5,8 @@ priority + failover routing reused from ``router_service``. Unlike the agent
 pipeline this is a faithful pass-through: it preserves ``usage``, ``tool_calls``,
 and the upstream SSE chunks byte-for-byte, so the OpenAI SDK / Codex see exactly
 what they expect.
+
+Phase 11: Uses circuit breaker pattern for resilient failover.
 """
 from __future__ import annotations
 
@@ -19,13 +21,15 @@ from app.core import crypto
 from app.models.provider import Provider
 from app.services.router_service import (
     _resolve_attempts,
-    _is_on_cooldown,
-    _set_cooldown,
+    _is_circuit_open,
+    _record_success,
+    _record_failure,
+    _update_quota,
+    _is_retryable_status,
 )
 from app.services.routing_service import is_auto, choose_models
 from app.services import key_service
 
-# Control fields we own — everything else is forwarded to the provider verbatim.
 _CONTROL_FIELDS = {"model"}
 
 
@@ -50,7 +54,6 @@ def build_attempts(
     messages: list[dict],
     preferred_provider_id: str | None = None,
 ) -> list[tuple[str, Provider]]:
-    """Ordered (model_id, provider) attempts for this request."""
     if is_auto(model):
         ranked = choose_models(
             db, user_id, messages, _has_image(messages), preferred_provider_id
@@ -75,9 +78,6 @@ async def completion(
     body: dict,
     preferred_provider_id: str | None = None,
 ) -> dict:
-    """Non-streaming completion with failover. Returns upstream JSON verbatim
-    (with the requested ``model`` echoed back). Raises NoProvidersError or
-    RuntimeError(last_error)."""
     model = body.get("model") or "auto"
     messages = body.get("messages") or []
     attempts = build_attempts(db, user_id, model, messages, preferred_provider_id)
@@ -86,8 +86,7 @@ async def completion(
 
     last_error = "All providers failed."
     for attempt_model, provider in attempts:
-        pid = str(provider.id)
-        if _is_on_cooldown(pid):
+        if _is_circuit_open(provider):
             continue
         headers, pk = _auth_headers(db, provider)
         payload = _forward_payload(body, attempt_model, stream=False)
@@ -99,35 +98,31 @@ async def completion(
                     json=payload,
                 )
             if resp.status_code >= 400:
-                if resp.status_code == 429:
-                    _set_cooldown(pid)
-                    provider.status = "rate_limited"
-                    if pk:
+                error_msg = f"Provider '{provider.name}' HTTP {resp.status_code}: {resp.text[:300]}"
+                if pk:
+                    if resp.status_code == 429:
                         key_service.set_cooldown(db, pk)
-                else:
-                    provider.status = "error"
-                    if pk:
+                    else:
                         key_service.set_error(db, pk, f"HTTP {resp.status_code}")
-                db.commit()
-                last_error = (
-                    f"Provider '{provider.name}' HTTP {resp.status_code}: "
-                    f"{resp.text[:300]}"
-                )
+                _record_failure(db, provider, error_msg, resp.status_code)
+                if not _is_retryable_status(resp.status_code):
+                    raise RuntimeError(error_msg)
+                last_error = error_msg
                 continue
             data = resp.json()
-            provider.status = "healthy"
+            _record_success(db, provider)
+            _update_quota(db, provider, dict(resp.headers))
             if pk:
                 tokens = data.get("usage", {}).get("total_tokens", 0)
                 key_service.record_usage(db, pk, dict(resp.headers), tokens)
-            db.commit()
             data.setdefault("model", attempt_model)
             return data
         except httpx.HTTPError as exc:
-            provider.status = "error"
+            error_msg = f"Provider '{provider.name}' error: {exc}"
             if pk:
                 key_service.set_error(db, pk, str(exc))
-            db.commit()
-            last_error = f"Provider '{provider.name}' error: {exc}"
+            _record_failure(db, provider, error_msg)
+            last_error = error_msg
 
     raise RuntimeError(last_error)
 
@@ -138,9 +133,6 @@ async def stream(
     body: dict,
     preferred_provider_id: str | None = None,
 ) -> AsyncIterator[str]:
-    """Streaming completion. Yields raw SSE lines (``data: {...}\\n\\n``) from the
-    first provider that starts producing output. Fails over only before the first
-    byte — once streaming has begun we are committed to that provider."""
     model = body.get("model") or "auto"
     messages = body.get("messages") or []
     attempts = build_attempts(db, user_id, model, messages, preferred_provider_id)
@@ -149,8 +141,7 @@ async def stream(
 
     last_error = "All providers failed."
     for attempt_model, provider in attempts:
-        pid = str(provider.id)
-        if _is_on_cooldown(pid):
+        if _is_circuit_open(provider):
             continue
         headers, pk = _auth_headers(db, provider)
         payload = _forward_payload(body, attempt_model, stream=True)
@@ -164,35 +155,32 @@ async def stream(
                 ) as resp:
                     if resp.status_code >= 400:
                         body_text = (await resp.aread()).decode("utf-8", "replace")[:300]
-                        if resp.status_code == 429:
-                            _set_cooldown(pid)
-                            provider.status = "rate_limited"
-                            if pk:
+                        error_msg = f"Provider '{provider.name}' HTTP {resp.status_code}: {body_text}"
+                        if pk:
+                            if resp.status_code == 429:
                                 key_service.set_cooldown(db, pk)
-                        else:
-                            provider.status = "error"
-                            if pk:
+                            else:
                                 key_service.set_error(db, pk, f"HTTP {resp.status_code}")
-                        db.commit()
-                        last_error = (
-                            f"Provider '{provider.name}' HTTP {resp.status_code}: {body_text}"
-                        )
+                        _record_failure(db, provider, error_msg, resp.status_code)
+                        if not _is_retryable_status(resp.status_code):
+                            raise RuntimeError(error_msg)
+                        last_error = error_msg
                         continue
-                    provider.status = "healthy"
+                    _record_success(db, provider)
+                    _update_quota(db, provider, dict(resp.headers))
                     if pk:
                         key_service.record_usage(db, pk, dict(resp.headers))
-                    db.commit()
                     async for line in resp.aiter_lines():
                         if line:
                             yield f"{line}\n\n"
                     yield "data: [DONE]\n\n"
                     return
         except httpx.HTTPError as exc:
-            provider.status = "error"
+            error_msg = f"Provider '{provider.name}' error: {exc}"
             if pk:
                 key_service.set_error(db, pk, str(exc))
-            db.commit()
-            last_error = f"Provider '{provider.name}' error: {exc}"
+            _record_failure(db, provider, error_msg)
+            last_error = error_msg
 
     raise RuntimeError(last_error)
 
@@ -203,7 +191,6 @@ async def embeddings(
     body: dict,
     preferred_provider_id: str | None = None,
 ) -> dict:
-    """Forward an embeddings request with failover. Returns upstream JSON verbatim."""
     model = body.get("model", "")
     attempts = _resolve_attempts(db, user_id, model, preferred_provider_id, None)
     if not attempts:
@@ -211,8 +198,7 @@ async def embeddings(
 
     last_error = "All providers failed."
     for attempt_model, provider in attempts:
-        pid = str(provider.id)
-        if _is_on_cooldown(pid):
+        if _is_circuit_open(provider):
             continue
         headers, pk = _auth_headers(db, provider)
         payload = dict(body, model=attempt_model)
@@ -224,40 +210,35 @@ async def embeddings(
                     json=payload,
                 )
             if resp.status_code >= 400:
-                if resp.status_code == 429:
-                    _set_cooldown(pid)
-                    provider.status = "rate_limited"
-                    if pk:
+                error_msg = f"Provider '{provider.name}' HTTP {resp.status_code}: {resp.text[:300]}"
+                if pk:
+                    if resp.status_code == 429:
                         key_service.set_cooldown(db, pk)
-                else:
-                    provider.status = "error"
-                    if pk:
+                    else:
                         key_service.set_error(db, pk, f"HTTP {resp.status_code}")
-                db.commit()
-                last_error = (
-                    f"Provider '{provider.name}' HTTP {resp.status_code}: "
-                    f"{resp.text[:300]}"
-                )
+                _record_failure(db, provider, error_msg, resp.status_code)
+                if not _is_retryable_status(resp.status_code):
+                    raise RuntimeError(error_msg)
+                last_error = error_msg
                 continue
             data = resp.json()
-            provider.status = "healthy"
+            _record_success(db, provider)
+            _update_quota(db, provider, dict(resp.headers))
             if pk:
                 tokens = data.get("usage", {}).get("total_tokens", 0)
                 key_service.record_usage(db, pk, dict(resp.headers), tokens)
-            db.commit()
             return data
         except httpx.HTTPError as exc:
-            provider.status = "error"
+            error_msg = f"Provider '{provider.name}' error: {exc}"
             if pk:
                 key_service.set_error(db, pk, str(exc))
-            db.commit()
-            last_error = f"Provider '{provider.name}' error: {exc}"
+            _record_failure(db, provider, error_msg)
+            last_error = error_msg
 
     raise RuntimeError(last_error)
 
 
 def _auth_headers(db: Session, provider: Provider):
-    """Pick the best ProviderKey (if any) and return (headers_dict, key_or_None)."""
     pk = key_service.pick_key(db, provider)
     if pk:
         plaintext = key_service.decrypt_key(pk)

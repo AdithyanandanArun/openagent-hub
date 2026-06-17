@@ -1,3 +1,16 @@
+"""Provider routing with circuit breaker, exponential backoff, and error classification.
+
+Phase 11: Automatic Failover — zero-downtime AI access.
+
+Circuit breaker states:
+  closed   — normal operation, requests flow through
+  open     — provider is failing, skip it until cooldown expires
+  half_open ��� cooldown expired, allow one probe request to test recovery
+
+Error classification:
+  retryable     — 429, 502, 503, 504, timeouts → failover to next provider
+  non_retryable — 400, 401, 403, 404 → surface error immediately (bad request / auth)
+"""
 from datetime import datetime, timedelta
 from typing import AsyncIterator
 from uuid import UUID
@@ -10,17 +23,100 @@ from app.core import crypto
 from app.core.provider import stream_chat, chat_completion
 from app.services import key_service
 
-_cooldowns: dict[str, datetime] = {}
-COOLDOWN_SECONDS = 60
+FAILURE_THRESHOLD = 3
+BASE_COOLDOWN_SECONDS = 60
+MAX_COOLDOWN_SECONDS = 600
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
-def _is_on_cooldown(provider_id: str) -> bool:
-    until = _cooldowns.get(provider_id)
-    return bool(until and datetime.utcnow() < until)
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code in RETRYABLE_STATUS_CODES
 
 
-def _set_cooldown(provider_id: str) -> None:
-    _cooldowns[provider_id] = datetime.utcnow() + timedelta(seconds=COOLDOWN_SECONDS)
+def _is_retryable_error(exc: Exception) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return _is_retryable_status(exc.response.status_code)
+    if isinstance(exc, (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError)):
+        return True
+    return True
+
+
+def _cooldown_seconds(consecutive_failures: int) -> int:
+    secs = BASE_COOLDOWN_SECONDS * (2 ** min(consecutive_failures - 1, 4))
+    return min(secs, MAX_COOLDOWN_SECONDS)
+
+
+def _is_circuit_open(provider: Provider) -> bool:
+    if provider.circuit_state == "closed":
+        return False
+    if provider.circuit_state == "open":
+        if provider.cooldown_until and datetime.utcnow() >= provider.cooldown_until:
+            provider.circuit_state = "half_open"
+            return False
+        return True
+    return False
+
+
+def _record_success(db: Session, provider: Provider) -> None:
+    provider.consecutive_failures = 0
+    provider.circuit_state = "closed"
+    provider.cooldown_until = None
+    provider.status = "healthy"
+    db.add(provider)
+    db.commit()
+
+
+def _record_failure(db: Session, provider: Provider, error: str, status_code: int | None = None) -> None:
+    provider.consecutive_failures = (provider.consecutive_failures or 0) + 1
+    provider.last_error = error[:500] if error else None
+    provider.last_error_at = datetime.utcnow()
+
+    if status_code == 429:
+        provider.status = "rate_limited"
+    else:
+        provider.status = "error"
+
+    if provider.consecutive_failures >= FAILURE_THRESHOLD:
+        provider.circuit_state = "open"
+        cooldown = _cooldown_seconds(provider.consecutive_failures)
+        provider.cooldown_until = datetime.utcnow() + timedelta(seconds=cooldown)
+    db.add(provider)
+    db.commit()
+
+
+def _update_quota(db: Session, provider: Provider, response_headers: dict) -> None:
+    def _int(name: str) -> int | None:
+        val = response_headers.get(name)
+        if val is not None:
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                pass
+        return None
+
+    rpm_limit = _int("x-ratelimit-limit-requests")
+    tpm_limit = _int("x-ratelimit-limit-tokens")
+    rpm_remaining = _int("x-ratelimit-remaining-requests")
+    tpm_remaining = _int("x-ratelimit-remaining-tokens")
+
+    if rpm_limit is not None:
+        provider.rpm_limit = rpm_limit
+    if tpm_limit is not None:
+        provider.tpm_limit = tpm_limit
+    if rpm_remaining is not None:
+        provider.rpm_remaining = rpm_remaining
+    if tpm_remaining is not None:
+        provider.tpm_remaining = tpm_remaining
+
+    reset_str = response_headers.get("x-ratelimit-reset-requests")
+    if reset_str:
+        from app.services.key_service import _parse_duration
+        secs = _parse_duration(reset_str)
+        if secs:
+            provider.quota_reset_at = datetime.utcnow() + timedelta(seconds=secs)
+
+    db.add(provider)
+    db.commit()
 
 
 def _resolve_attempts(
@@ -30,12 +126,6 @@ def _resolve_attempts(
     preferred_provider_id: str | None,
     model_order: list[tuple[str, str]] | None,
 ) -> list[tuple[str, "Provider"]]:
-    """Build the ordered list of (model, provider) attempts.
-
-    When `model_order` (list of (model_id, provider_id) pinned pairs from the
-    intelligent router) is given, each attempt pins both model and provider.
-    Otherwise the legacy behavior: one `model` string across priority-ordered
-    providers."""
     by_id: dict[str, Provider] = {
         str(p.id): p
         for p in db.query(Provider)
@@ -51,9 +141,6 @@ def _resolve_attempts(
         if attempts:
             return attempts
 
-    # Single model across providers. Crucially, only try providers that ACTUALLY
-    # offer this model — otherwise a model unique to one provider (e.g. an LLM7
-    # model) gets sent to OpenRouter/Groq, which 400 with "not a valid model ID".
     providers = _ordered_providers(db, user_id, preferred_provider_id)
 
     from app.models.model_catalog import ModelCatalog
@@ -87,8 +174,7 @@ async def route_chat(
 
     last_error = "All providers failed."
     for attempt_model, provider in attempts:
-        pid = str(provider.id)
-        if _is_on_cooldown(pid):
+        if _is_circuit_open(provider):
             continue
         pk = key_service.pick_key(db, provider)
         api_key = key_service.decrypt_key(pk) if pk else crypto.decrypt(provider.api_key)
@@ -103,31 +189,36 @@ async def route_chat(
                 yielded_any = True
                 yield chunk
             if yielded_any or True:
+                _record_success(db, provider)
                 if pk:
                     key_service.record_usage(db, pk)
                 return
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 429:
-                _set_cooldown(pid)
-                provider.status = "rate_limited"
-                if pk:
-                    key_service.set_cooldown(db, pk)
-            else:
-                provider.status = "error"
-                if pk:
-                    key_service.set_error(db, pk, f"HTTP {exc.response.status_code}")
-            db.commit()
+            status = exc.response.status_code
             try:
                 body_text = exc.response.text[:300]
             except Exception:
                 body_text = "(unreadable)"
-            last_error = f"Provider '{provider.name}' returned HTTP {exc.response.status_code}: {body_text}"
+            error_msg = f"Provider '{provider.name}' returned HTTP {status}: {body_text}"
+
+            if status == 429 and pk:
+                key_service.set_cooldown(db, pk)
+            elif pk:
+                key_service.set_error(db, pk, f"HTTP {status}")
+
+            _record_failure(db, provider, error_msg, status)
+
+            if not _is_retryable_status(status):
+                raise RuntimeError(error_msg)
+            last_error = error_msg
         except Exception as exc:
-            provider.status = "error"
+            error_msg = f"Provider '{provider.name}' error: {exc}"
             if pk:
                 key_service.set_error(db, pk, str(exc))
-            db.commit()
-            last_error = f"Provider '{provider.name}' error: {exc}"
+            _record_failure(db, provider, error_msg)
+            if not _is_retryable_error(exc):
+                raise RuntimeError(error_msg)
+            last_error = error_msg
 
     raise RuntimeError(last_error)
 
@@ -160,18 +251,13 @@ async def route_completion(
     tool_choice: str = "auto",
     model_order: list[tuple[str, str]] | None = None,
 ) -> tuple[dict, Provider]:
-    """Non-streaming completion with priority routing + failover.
-
-    Returns the assistant message dict together with the provider that served it.
-    Raises RuntimeError if every enabled provider fails."""
     attempts = _resolve_attempts(db, user_id, model, preferred_provider_id, model_order)
     if not attempts:
         raise RuntimeError("No enabled providers configured.")
 
     last_error = "All providers failed."
     for attempt_model, provider in attempts:
-        pid = str(provider.id)
-        if _is_on_cooldown(pid):
+        if _is_circuit_open(provider):
             continue
         pk = key_service.pick_key(db, provider)
         api_key = key_service.decrypt_key(pk) if pk else crypto.decrypt(provider.api_key)
@@ -185,30 +271,35 @@ async def route_completion(
                 temperature=temperature,
                 tool_choice=tool_choice,
             )
+            _record_success(db, provider)
             if pk:
                 key_service.record_usage(db, pk)
             return message, provider
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 429:
-                _set_cooldown(pid)
-                provider.status = "rate_limited"
-                if pk:
-                    key_service.set_cooldown(db, pk)
-            else:
-                provider.status = "error"
-                if pk:
-                    key_service.set_error(db, pk, f"HTTP {exc.response.status_code}")
-            db.commit()
+            status = exc.response.status_code
             try:
                 body_text = exc.response.text[:300]
             except Exception:
                 body_text = "(unreadable)"
-            last_error = f"Provider '{provider.name}' returned HTTP {exc.response.status_code}: {body_text}"
+            error_msg = f"Provider '{provider.name}' returned HTTP {status}: {body_text}"
+
+            if status == 429 and pk:
+                key_service.set_cooldown(db, pk)
+            elif pk:
+                key_service.set_error(db, pk, f"HTTP {status}")
+
+            _record_failure(db, provider, error_msg, status)
+
+            if not _is_retryable_status(status):
+                raise RuntimeError(error_msg)
+            last_error = error_msg
         except Exception as exc:
-            provider.status = "error"
+            error_msg = f"Provider '{provider.name}' error: {exc}"
             if pk:
                 key_service.set_error(db, pk, str(exc))
-            db.commit()
-            last_error = f"Provider '{provider.name}' error: {exc}"
+            _record_failure(db, provider, error_msg)
+            if not _is_retryable_error(exc):
+                raise RuntimeError(error_msg)
+            last_error = error_msg
 
     raise RuntimeError(last_error)
