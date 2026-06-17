@@ -5,10 +5,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.provider import fetch_models
 from app.models.provider import Provider
 from app.services.auth_service import get_current_user
-from app.services.catalog_service import get_catalog, sync_provider_models, update_model_meta
+from app.services.catalog_service import get_catalog, sync_provider_models, update_model_meta, backfill_classification, purge_paid_models, mark_free_models
+from app.services.provider_service import fetch_provider_models
+from app.services.reliability_service import refresh_reliability_stats
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 security = HTTPBearer()
@@ -34,6 +35,13 @@ def list_catalog(user=Depends(_current_user), db: Session = Depends(get_db)):
             "reasoning_support": e.reasoning_support,
             "coding_score": e.coding_score,
             "speed_score": e.speed_score,
+            "knowledge_score": e.knowledge_score,
+            "model_family": e.model_family,
+            "param_billions": e.param_billions,
+            "reliability_score": e.reliability_score,
+            "avg_latency_ms": e.avg_latency_ms,
+            "error_rate": e.error_rate,
+            "is_free": e.is_free,
             "is_enabled": e.is_enabled,
             "last_seen_at": e.last_seen_at.isoformat() if e.last_seen_at else None,
         }
@@ -52,7 +60,9 @@ async def sync_catalog(user=Depends(_current_user), db: Session = Depends(get_db
     errors = []
     for p in providers:
         try:
-            model_ids = await fetch_models(p.base_url, p.api_key)
+            # fetch_provider_models applies the free-model filter + per-provider
+            # /models endpoint quirks (GitHub catalog, Cloudflare search, …).
+            model_ids = await fetch_provider_models(db, user.id, p.id)
             sync_provider_models(db, user.id, p, model_ids)
             total += len(model_ids)
         except Exception as exc:
@@ -72,3 +82,22 @@ def patch_model(
     if not entry:
         raise HTTPException(status_code=404, detail="Model not found in catalog")
     return {"ok": True}
+
+
+@router.post("/reclassify")
+def reclassify_catalog(user=Depends(_current_user), db: Session = Depends(get_db)):
+    count = backfill_classification(db, user.id)
+    return {"reclassified": count}
+
+
+@router.post("/refresh-stats")
+def refresh_stats(user=Depends(_current_user), db: Session = Depends(get_db)):
+    count = refresh_reliability_stats(db, user.id)
+    return {"updated": count}
+
+
+@router.post("/purge-paid")
+def purge_paid(user=Depends(_current_user), db: Session = Depends(get_db)):
+    marked = mark_free_models(db, user.id)
+    deleted = purge_paid_models(db, user.id)
+    return {"marked": marked, "deleted": deleted}

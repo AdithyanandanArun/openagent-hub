@@ -17,6 +17,7 @@ export function useChat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingTools, setStreamingTools] = useState<{ tool: string; input?: any; output?: string }[]>([]);
+  const [routeInfo, setRouteInfo] = useState<{ model: string; provider?: string | null; reason?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -65,7 +66,7 @@ export function useChat() {
       model: string | null,
       attachmentIds?: string[],
       providerId?: string | null,
-      opts?: { useTools?: boolean; toolMode?: 'off' | 'auto' | 'always'; toolNames?: string[] | null; skillId?: string | null; skillAuto?: boolean },
+      opts?: { useTools?: boolean; toolMode?: 'off' | 'auto' | 'always'; toolNames?: string[] | null; skillId?: string | null; skillAuto?: boolean; routingMode?: string },
     ) => {
       const token = localStorage.getItem('token');
       if (!token) return;
@@ -74,6 +75,7 @@ export function useChat() {
       setIsStreaming(true);
       setStreamingContent('');
       setStreamingTools([]);
+      setRouteInfo(null);
 
       const userMessage: Message = {
         id: crypto.randomUUID(),
@@ -135,6 +137,8 @@ export function useChat() {
           toolNames: opts?.toolNames,
           skillId: opts?.skillId,
           skillAuto: opts?.skillAuto,
+          routingMode: opts?.routingMode,
+          onRoute: (info) => setRouteInfo(info),
           onToolCall: (tool, input) => setStreamingTools((p) => [...p, { tool, input }]),
           onToolResult: (tool, output) =>
             setStreamingTools((p) => {
@@ -199,6 +203,7 @@ export function useChat() {
     isStreaming,
     streamingContent,
     streamingTools,
+    routeInfo,
     error,
     loadConversations,
     selectConversation,

@@ -12,3 +12,6 @@ from app.models.agent import Agent
 from app.models.agent_run import AgentRun
 from app.models.agent_step import AgentStep
 from app.models.mcp_server import MCPServer
+from app.models.api_token import ApiToken
+from app.models.provider_key import ProviderKey
+from app.models.request_log import RequestLog

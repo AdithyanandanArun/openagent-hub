@@ -1,6 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from typing import Optional, List
 from uuid import UUID
+
+from app.core import crypto
 
 
 class ChatRequest(BaseModel):
@@ -14,6 +16,7 @@ class ChatRequest(BaseModel):
     tool_names: Optional[List[str]] = None  # restrict to these tools; None/[] = all available
     skill_id: Optional[UUID] = None
     skill_auto: bool = False  # when true (and no explicit skill_id), let the model adopt the most relevant skill
+    routing_mode: Optional[str] = "balanced"  # "speed" | "quality" | "reliability" | "balanced"
 
 
 class ProviderConfigRequest(BaseModel):
@@ -32,3 +35,7 @@ class ProviderConfigResponse(BaseModel):
     is_default: bool
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("api_key")
+    def _mask_api_key(self, value: str) -> str:
+        return crypto.mask(value)

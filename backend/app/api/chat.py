@@ -18,6 +18,7 @@ from app.services.conversation_service import (
 )
 from app.services.llm_service import get_provider_config
 from app.services.memory_service import build_memory_context
+from app.services.request_logger import RequestTimer, log_request
 from app.models.attachment import Attachment
 from app.schemas.conversation import ConversationCreate
 from app.schemas.chat import ChatRequest
@@ -151,8 +152,9 @@ async def chat_stream(
         messages[-1]["content"] = user_content
 
     # Extract all primitives before the DI session closes
+    from app.core import crypto
     base_url = provider.base_url
-    api_key = provider.api_key
+    api_key = crypto.decrypt(provider.api_key)
     model = request.model or provider.model
     conv_id: UUID = conv.id
     user_id: UUID = user.id
@@ -176,10 +178,52 @@ async def chat_stream(
         else:
             allowed_tool_names = picked
 
+    # Intelligent routing (Phase 10): when the user picks the "auto" model,
+    # resolve the best concrete model + an ordered failover list from the catalog.
+    from app.services.routing_service import is_auto, choose_models
+    from app.models.provider import Provider as ProviderModel
+    route_info = None
+    model_order = None
+    if is_auto(model):
+        if use_router:
+            has_image = any(
+                (a.content_type or "").startswith("image/") for a in attachment_refs
+            )
+            routing_mode = (request.routing_mode or "balanced").lower()
+            if routing_mode not in ("speed", "quality", "reliability", "balanced"):
+                routing_mode = "balanced"
+            ranked = choose_models(
+                db, user_id, messages,
+                has_image=has_image,
+                preferred_provider_id=preferred_provider_id,
+                routing_mode=routing_mode,
+            )
+            if ranked:
+                model_order = [(m, p) for (m, p, _r) in ranked]
+                top_model, top_pid, top_reason = ranked[0]
+                model = top_model
+                prov = (
+                    db.query(ProviderModel)
+                    .filter(ProviderModel.id == top_pid, ProviderModel.user_id == user_id)
+                    .first()
+                )
+                route_info = {
+                    "type": "route",
+                    "model": top_model,
+                    "provider": prov.name if prov else None,
+                    "reason": top_reason,
+                }
+        if is_auto(model):
+            # Couldn't resolve (no catalog / single-provider config) — fall back.
+            model = provider.model or model
+
     async def generate():
         full_response = ""
+        timer = RequestTimer()
         try:
             yield f"data: {json.dumps({'type': 'conversation_id', 'conversation_id': str(conv_id)})}\n\n"
+            if route_info:
+                yield f"data: {json.dumps(route_info)}\n\n"
 
             if use_tools:
                 from app.services.chat_agent_service import stream_chat_with_tools
@@ -192,6 +236,7 @@ async def chat_stream(
                     preferred_provider_id=preferred_provider_id,
                     allowed_tool_names=allowed_tool_names,
                     tool_mode=tool_mode,
+                    model_order=model_order,
                 ):
                     if evt.get("type") == "chunk":
                         full_response += evt["content"]
@@ -199,7 +244,7 @@ async def chat_stream(
             else:
                 with SessionLocal() as stream_db:
                     if use_router:
-                        chunks = route_chat(stream_db, user_id, model, messages, preferred_provider_id)
+                        chunks = route_chat(stream_db, user_id, model, messages, preferred_provider_id, model_order=model_order)
                     else:
                         chunks = stream_chat(base_url=base_url, api_key=api_key, model=model, messages=messages)
 
@@ -209,9 +254,15 @@ async def chat_stream(
 
             with SessionLocal() as fresh_db:
                 add_message(fresh_db, conv_id, "assistant", full_response)
+                log_request(fresh_db, user_id=user_id, endpoint="/api/chat/stream",
+                            model=model, status_code=200, latency_ms=timer.elapsed_ms, is_stream=True)
 
             yield f"data: {json.dumps({'type': 'done', 'conversation_id': str(conv_id)})}\n\n"
         except Exception as e:
+            with SessionLocal() as err_db:
+                log_request(err_db, user_id=user_id, endpoint="/api/chat/stream",
+                            model=model, status_code=500, latency_ms=timer.elapsed_ms,
+                            is_stream=True, error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(

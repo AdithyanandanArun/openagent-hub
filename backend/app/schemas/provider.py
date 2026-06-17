@@ -1,7 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from typing import Optional
 from uuid import UUID
 from datetime import datetime
+
+from app.core import crypto
 
 
 class ProviderCreate(BaseModel):
@@ -30,6 +32,11 @@ class ProviderResponse(BaseModel):
     last_checked_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("api_key")
+    def _mask_api_key(self, value: str) -> str:
+        # Never expose stored secrets (ciphertext or plaintext) over the API.
+        return crypto.mask(value)
 
 
 class ProviderTestResult(BaseModel):

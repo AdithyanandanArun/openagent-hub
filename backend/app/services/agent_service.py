@@ -20,6 +20,7 @@ from datetime import datetime
 from uuid import UUID
 
 from app.core.database import SessionLocal
+from app.core import crypto
 from app.models.agent import Agent
 from app.models.agent_run import AgentRun
 from app.models.agent_step import AgentStep
@@ -190,17 +191,18 @@ def _safe_config_model(db, user_id: UUID) -> str | None:
         return None
 
 
-async def _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice="auto"):
+async def _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice="auto", model_order=None):
     if use_router:
         message, _provider = await route_completion(
             db, user_id, model, messages, tools=tools,
             preferred_provider_id=preferred_provider_id, tool_choice=tool_choice,
+            model_order=model_order,
         )
         return message
     cfg = get_provider_config(db, user_id)
     return await chat_completion(
         base_url=cfg.base_url,
-        api_key=cfg.api_key,
+        api_key=crypto.decrypt(cfg.api_key),
         model=model or cfg.model,
         messages=messages,
         tools=tools,
@@ -208,16 +210,16 @@ async def _complete_once(db, user_id, model, messages, tools, use_router, prefer
     )
 
 
-async def _complete(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice="auto"):
+async def _complete(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice="auto", model_order=None):
     """One LLM completion with a single retry on transient upstream failures.
 
     Providers occasionally return transient 4xx/5xx (e.g. upstream routing hiccups);
     a single retry meaningfully improves sub-agent reliability without masking real errors."""
     try:
-        return await _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice)
+        return await _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice, model_order)
     except Exception:  # noqa: BLE001
         await asyncio.sleep(0.6)
-        return await _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice)
+        return await _complete_once(db, user_id, model, messages, tools, use_router, preferred_provider_id, tool_choice, model_order)
 
 
 async def run_agent(
@@ -363,6 +365,27 @@ async def run_agent(
 
             model, use_router = _resolve_model(db, user_id, model_pref)
 
+            # Intelligent routing (Phase 10): if the agent's model is "auto", pick the
+            # best concrete model + failover order from the catalog based on the goal.
+            from app.services.routing_service import is_auto, choose_models
+            model_order = None
+            route_reason = None
+            if is_auto(model_pref) or is_auto(model):
+                if use_router:
+                    profile_text = continue_message or goal
+                    ranked = choose_models(
+                        db, user_id,
+                        [{"role": "user", "content": profile_text}],
+                        has_image=False,
+                        preferred_provider_id=provider_pref,
+                    )
+                    if ranked:
+                        model_order = [(m, p) for (m, p, _r) in ranked]
+                        model, _pid, route_reason = ranked[0]
+                if is_auto(model):
+                    # Couldn't resolve — fall back to the config default.
+                    model = _safe_config_model(db, user_id) or ""
+
             registry = agent_tools.build_registry(
                 db, user_id, allow_subagents=allow_subagents,
                 allowed_tool_names=allowed_tools, team=team,
@@ -382,7 +405,10 @@ async def run_agent(
                 team=team,
             )
             if allow_subagents:
-                ctx.spawn_fn = _make_spawn_fn(user_id, run_id, model_pref, provider_pref, conversation_id, depth)
+                # Generic sub-agents inherit the *resolved* concrete model (not "auto"),
+                # so routing happens once at the top level; delegated team agents still
+                # use their own template model (handled inside the spawn fn).
+                ctx.spawn_fn = _make_spawn_fn(user_id, run_id, model, provider_pref, conversation_id, depth)
 
             # Continuation: rebuild the prior transcript so the agent has context, and
             # resume the step index after the existing steps. Otherwise start fresh.
@@ -405,6 +431,15 @@ async def run_agent(
             run.error = None
             db.commit()
             yield {"type": "status", "status": "running", "run_id": str(run_id)}
+
+            # Surface the routing decision in the timeline (auto mode only).
+            if route_reason:
+                _record_step(db, run_id, start_index, "thought",
+                             content=f"↳ Routed to {model} ({route_reason})")
+                start_index += 1
+                yield {"type": "thought",
+                       "content": f"↳ Routed to **{model}** ({route_reason})",
+                       "index": start_index - 1}
 
             if continue_message:
                 messages = (
@@ -441,7 +476,7 @@ async def run_agent(
                 # subsequent iterations use "auto" so the agent can produce a final answer.
                 tool_choice = "required" if (tool_mode == "always" and iteration == 0 and openai_tools) else "auto"
                 message = await _complete(
-                    db, user_id, model, messages, openai_tools, use_router, provider_pref, tool_choice
+                    db, user_id, model, messages, openai_tools, use_router, provider_pref, tool_choice, model_order
                 )
                 tool_calls = message.get("tool_calls") or []
                 # Backfill missing/duplicate tool_call ids so the assistant message

@@ -2,11 +2,11 @@
 
 An open-source AI Operating System that unifies multiple LLM providers, models, agents, tools, and memory into a single self-hosted platform.
 
-Connect Groq, OpenRouter, Ollama, Google AI Studio, or any OpenAI-compatible provider. OpenAgent Hub routes requests intelligently, handles failover automatically, and presents a single clean interface — no provider juggling required.
+Connect Groq, OpenRouter, Google AI Studio, Mistral, NVIDIA NIM, Cohere, Cerebras, Cloudflare Workers AI, or any OpenAI-compatible provider. OpenAgent Hub intelligently routes requests to the best free model for each task, handles failover automatically, and presents a single clean interface — no provider juggling required.
 
 ---
 
-## Features (current — Phase 9)
+## Features
 
 **Chat & workspace**
 - **Chat workspace** — ChatGPT-style conversations with streaming responses, markdown rendering, code highlighting (Prism), and KaTeX math
@@ -16,21 +16,34 @@ Connect Groq, OpenRouter, Ollama, Google AI Studio, or any OpenAI-compatible pro
 
 **Providers & models**
 - **Multi-provider support** — Add any number of OpenAI-compatible providers; models are fetched from each
-- **Provider health & testing** — Test connectivity, view status (healthy / error / rate_limited), enable/disable
-- **Priority-based routing** — Requests route through providers in priority order with automatic 60s cooldown on rate limits
-- **Unified model catalog** — Models normalized with capability metadata (context window, vision, reasoning, coding/speed scores)
-- **Grouped model picker** — Models listed by provider with capability badges; switch providers inline
+- **20 provider presets** — One-click setup for Groq, OpenRouter, Google AI Studio, Mistral, NVIDIA NIM, Cohere, Cerebras, GitHub Models, HuggingFace, Zhipu AI, OpenCode Zen, LLM7, Pollinations, Ollama Cloud, Kilo Gateway, Cloudflare Workers AI, SambaNova, OVHcloud, DeepInfra, and local Ollama
+- **Free-only model catalog** — Only free models are synced and routed; paid models are automatically filtered out using provider-specific rules (`:free` suffix, quota-gated tiers, pricing metadata)
+- **Model taxonomy** — 170+ model families classified with speed, coding, knowledge, vision, and reasoning scores
+- **Provider health & testing** — Test connectivity, view status, enable/disable providers
+- **Grouped model picker** — Models listed by provider with capability badges (vision, reasoning, fast, context window)
+
+**Intelligent routing**
+- **Smart Auto mode** — Automatically picks the best free model for each task based on message content analysis (coding, reasoning, vision, long context)
+- **4 routing modes** — User-selectable routing preference:
+  - **Balanced** — Smart task-aware routing (default)
+  - **Speed** — Fastest response time; picks lightweight flash models
+  - **Quality** — Best knowledge & reasoning; picks pro/large models
+  - **Reliability** — Proven uptime from your request history
+- **Reliability tracking** — Aggregates success rates, latency, and error rates per model from actual request logs
+- **Priority-based failover** — Automatic 60s cooldown on rate-limited providers with fallback to next in line
 
 **Intelligence layer**
-- **Memory system** — Persistent user / project / conversation memory, injected into chats and agent runs (cross-chat memory)
+- **Memory system** — Persistent user / project / conversation memory, injected into chats and agent runs
 - **Agent framework** — Give a goal; the agent plans, calls tools in a ReAct loop, and streams a live step-by-step timeline
 - **Tools** — Built-in tools (calculate, memory read/write, time) plus any tool from connected MCP servers
-- **MCP integration** — Register stdio MCP servers; tools are discovered and made available to agents (a dependency-free example server ships built-in)
-- **Skills** — Reusable instruction sets (Code Review, Research, Documentation, Refactoring, Testing, + custom) that shape agent behaviour
+- **MCP integration** — Register stdio MCP servers; tools are discovered and made available to agents
+- **Skills** — Reusable instruction sets (Code Review, Research, Documentation, Refactoring, Testing, + custom)
 - **Multi-agent** — Coordinator agents can spawn sub-agents that run in parallel and share memory
 
 **Platform**
-- **Authentication** — JWT-based register/login/logout
+- **Authentication** — JWT-based register/login/logout with API token management
+- **Request logging & analytics** — Per-model request logs with latency tracking
+- **OpenAI-compatible API** — Drop-in `/v1/chat/completions` endpoint for external tool integration
 - **Light & dark theme**
 - **Fully self-hosted** — Docker Compose, no external dependencies
 
@@ -61,21 +74,49 @@ docker compose up -d --build
 
 Open [http://localhost:3000](http://localhost:3000), register an account, and add your first provider.
 
-> The app runs on port 3000 (frontend) and port 8000 (backend API). Port 3001 is intentionally left free for a local LLM container (e.g. Ollama or LM Studio at `http://host.docker.internal:3001/v1`).
+> The app runs on port 3000 (frontend) and port 8000 (backend API).
 
 ---
 
 ## Adding Providers
 
 1. Click your username → **Settings** → **Providers** tab
-2. Click **Add Provider** (or use a quick-add button for Groq, OpenRouter, Ollama, Google AI Studio)
+2. Click **Add Provider** (or use a quick-add preset for any of the 20 supported providers)
 3. Enter a name, base URL, and API key
-4. Click **Test** (⚡) to verify connectivity
-5. Models from all enabled providers appear in the model picker in chat
+4. Click **Test** to verify connectivity — only free models are synced
+5. Models from all enabled providers appear in the model picker
 
-Any OpenAI-compatible endpoint works as a provider.
+Any OpenAI-compatible endpoint works as a provider. The system automatically filters to free-tier models only.
 
-> Agents require a **tool-calling capable** model (e.g. GPT-4o / 4o-mini, Claude 3.5, Gemini 2.0). The agent view auto-selects a suitable default from your providers.
+### Supported Free Providers
+
+| Provider | Free Tier | Notes |
+|----------|-----------|-------|
+| Groq | All models free | Per-model rate limits, no card required |
+| Google AI Studio | All models free | Per-project limits, Gemini 2.5/3.x models |
+| OpenRouter | `:free` suffix models | ~20 RPM / 200 RPD |
+| Mistral | All models free | Experiment plan, phone-verified |
+| NVIDIA NIM | Dev credits + free models | Key starts with `nvapi-` |
+| Cohere | Trial: 1000 calls/mo | Non-commercial, all models |
+| Cerebras | ~1M tokens/day | No card, 8K context cap |
+| GitHub Models | All models free | PAT with `models:read` scope |
+| Cloudflare Workers AI | 10K Neurons/day | Requires Account ID |
+| SambaNova | 200K TPD | No card, fast inference |
+| OVHcloud | 2 RPM/model | Anonymous, no signup, EU-hosted |
+| DeepInfra | Free serverless tier | Selected open-weight models |
+
+---
+
+## Routing Modes
+
+When using **Auto** model selection, the routing mode controls how models are ranked:
+
+- **Balanced** (default) — Analyzes your message to detect coding, reasoning, vision, or long-context needs, then picks the best-fit free model
+- **Speed** — Prioritizes fast inference; picks flash/mini models from providers like Groq and Google
+- **Quality** — Prioritizes knowledge and reasoning capability; picks pro/large parameter models
+- **Reliability** — Prioritizes models with the best observed success rate from your request history
+
+The routing mode selector appears in the chat input bar between the model picker and tools picker.
 
 ---
 
@@ -90,7 +131,7 @@ Any OpenAI-compatible endpoint works as a provider.
 
 - **Memory** (Settings → Memory) — add facts the AI should always know; they're injected into every chat and agent run
 - **Skills** (Settings → Skills) — five built-in skills ship by default; create your own instruction sets
-- **MCP** (Settings → MCP) — register stdio MCP servers to give agents more tools. A dependency-free **Example Tools** server is added automatically; click **↻** to connect and discover its tools. To add a real server, set a command (e.g. `npx`) and args (e.g. `-y @modelcontextprotocol/server-filesystem /path`).
+- **MCP** (Settings → MCP) — register stdio MCP servers to give agents more tools
 
 ---
 
@@ -103,20 +144,19 @@ openagent-hub/
 │   │   ├── api/          # FastAPI route handlers
 │   │   ├── models/       # SQLAlchemy ORM models
 │   │   ├── schemas/      # Pydantic request/response schemas
-│   │   ├── services/     # Business logic (chat, routing, providers)
+│   │   ├── services/     # Business logic (chat, routing, taxonomy, providers)
 │   │   └── main.py
-│   ├── migrations/       # Alembic migrations
+│   ├── migrations/       # Alembic migrations (001–012)
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── components/   # React components
+│   │   ├── components/   # React components (ChatInput, RoutingPicker, etc.)
 │   │   ├── hooks/        # Custom React hooks
 │   │   ├── pages/        # Page components
 │   │   └── services/     # API client functions
 │   └── package.json
 ├── docker-compose.yml
-├── Idea.md               # Vision & product spec
-└── Implementaion.md      # Phase-by-phase implementation plan
+└── README.md
 ```
 
 ---
@@ -125,16 +165,16 @@ openagent-hub/
 
 | Phase | Status | Description |
 |---|---|---|
-| 1 — Foundation | ✅ Complete | Auth, conversations, streaming chat, markdown |
-| 2 — Production UX | ✅ Complete | Attachments, message editing, projects, themes |
-| 3 — Multi-Provider | ✅ Complete | Provider registry, dynamic models, routing, failover |
-| 4 — Unified Model Layer | ✅ Complete | Model catalog with capability metadata |
-| 5 — Memory System | ✅ Complete | User, project, and conversation memory |
-| 6 — Agent Framework | ✅ Complete | Autonomous agent execution, task planning, tool calls |
-| 7 — MCP Integration | ✅ Complete | stdio MCP servers, dynamic tool discovery, permissions |
-| 8 — Multi-Agent | ✅ Complete | Sub-agents, parallel execution, shared memory |
-| 9 — Skills System | ✅ Complete | Reusable composable agent capabilities |
-| 10 — Intelligent Routing | Planned | Latency/cost/quality-aware routing profiles |
+| 1 — Foundation | Done | Auth, conversations, streaming chat, markdown |
+| 2 — Production UX | Done | Attachments, message editing, projects, themes |
+| 3 — Multi-Provider | Done | Provider registry, dynamic models, routing, failover |
+| 4 — Unified Model Layer | Done | Model catalog with capability metadata |
+| 5 — Memory System | Done | User, project, and conversation memory |
+| 6 — Agent Framework | Done | Autonomous agent execution, task planning, tool calls |
+| 7 — MCP Integration | Done | stdio MCP servers, dynamic tool discovery, permissions |
+| 8 — Multi-Agent | Done | Sub-agents, parallel execution, shared memory |
+| 9 — Skills System | Done | Reusable composable agent capabilities |
+| 10 — Intelligent Routing | Done | Model taxonomy, 4 routing modes, reliability tracking, free-only catalog |
 | 11 — Automatic Failover | Planned | Zero-downtime fallback chains |
 | 12 — AI Operating System | Planned | Unified API, quota pooling, developer platform |
 

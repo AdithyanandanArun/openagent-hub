@@ -18,10 +18,11 @@ from uuid import UUID
 import httpx
 
 from app.core.database import SessionLocal
+from app.core import crypto
 from app.core.provider import stream_chat
 from app.services import agent_tools
 from app.services.provider_service import has_enabled_providers
-from app.services.router_service import _ordered_providers, _is_on_cooldown, _set_cooldown
+from app.services.router_service import _ordered_providers, _is_on_cooldown, _set_cooldown, _resolve_attempts
 
 MAX_TOOL_ROUNDS = 5
 
@@ -33,7 +34,10 @@ async def _stream_one_turn(provider, model, messages, tools, on_event, tool_choi
     reconstructed from the stream (content + any tool_calls). Raises on HTTP error
     so the caller can fail over.
     """
-    headers = {"Authorization": f"Bearer {provider.api_key}", "Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json"}
+    _key = crypto.decrypt(getattr(provider, "api_key", "") or "")
+    if _key and _key.strip():
+        headers["Authorization"] = f"Bearer {_key.strip()}"
     payload = {"model": model, "messages": messages, "stream": True, "temperature": 0.5}
     if tools:
         payload["tools"] = tools
@@ -46,7 +50,17 @@ async def _stream_one_turn(provider, model, messages, tools, on_event, tool_choi
     async with httpx.AsyncClient(timeout=180.0) as client:
         async with client.stream("POST", f"{provider.base_url}/chat/completions",
                                  headers=headers, json=payload) as response:
-            response.raise_for_status()
+            if response.status_code >= 400:
+                error_body = ""
+                async for chunk in response.aiter_bytes():
+                    error_body += chunk.decode(errors="replace")
+                    if len(error_body) > 500:
+                        break
+                raise httpx.HTTPStatusError(
+                    f"HTTP {response.status_code}: {error_body[:500]}",
+                    request=response.request,
+                    response=response,
+                )
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -80,18 +94,22 @@ async def _stream_one_turn(provider, model, messages, tools, on_event, tool_choi
     return message
 
 
-async def _stream_turn_with_failover(db, user_id, model, messages, tools, preferred_provider_id, on_event, tool_choice="auto"):
-    """Stream one assistant turn, failing over across enabled providers."""
-    providers = _ordered_providers(db, user_id, preferred_provider_id)
-    if not providers:
+async def _stream_turn_with_failover(db, user_id, model, messages, tools, preferred_provider_id, on_event, tool_choice="auto", model_order=None):
+    """Stream one assistant turn, failing over across enabled providers.
+
+    When `model_order` (intelligent-routing pinned (model, provider) pairs) is
+    given, attempts follow that order; otherwise one model across priority-ordered
+    providers."""
+    attempts = _resolve_attempts(db, user_id, model, preferred_provider_id, model_order)
+    if not attempts:
         raise RuntimeError("No enabled providers configured.")
     last_error = "All providers failed."
-    for provider in providers:
+    for attempt_model, provider in attempts:
         pid = str(provider.id)
         if _is_on_cooldown(pid):
             continue
         try:
-            return await _stream_one_turn(provider, model, messages, tools, on_event, tool_choice)
+            return await _stream_one_turn(provider, attempt_model, messages, tools, on_event, tool_choice)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429:
                 _set_cooldown(pid)
@@ -99,7 +117,11 @@ async def _stream_turn_with_failover(db, user_id, model, messages, tools, prefer
             else:
                 provider.status = "error"
             db.commit()
-            last_error = f"Provider '{provider.name}' returned HTTP {exc.response.status_code}."
+            try:
+                body_text = exc.response.text[:300]
+            except Exception:
+                body_text = "(unreadable)"
+            last_error = f"Provider '{provider.name}' returned HTTP {exc.response.status_code}: {body_text}"
         except Exception as exc:  # noqa: BLE001
             provider.status = "error"
             db.commit()
@@ -116,6 +138,7 @@ async def stream_chat_with_tools(
     preferred_provider_id: str | None = None,
     allowed_tool_names: list[str] | None = None,
     tool_mode: str = "auto",
+    model_order: list[tuple[str, str]] | None = None,
 ):
     """Async generator yielding SSE event dicts: chunk / tool_call / tool_result / error.
 
@@ -157,7 +180,7 @@ async def stream_chat_with_tools(
             tool_choice = "required" if (tool_mode == "always" and _round == 0 and tools) else "auto"
             if use_router:
                 message = await _stream_turn_with_failover(
-                    db, user_id, model, working, tools, preferred_provider_id, on_event, tool_choice
+                    db, user_id, model, working, tools, preferred_provider_id, on_event, tool_choice, model_order
                 )
             else:
                 # single-provider: wrap config into a faux provider object

@@ -93,8 +93,10 @@ export function streamChat(
     toolNames?: string[] | null;
     skillId?: string | null;
     skillAuto?: boolean;
+    routingMode?: string;
     onToolCall?: (tool: string, input: any) => void;
     onToolResult?: (tool: string, output: string) => void;
+    onRoute?: (info: { model: string; provider?: string | null; reason?: string }) => void;
   },
 ): AbortController {
   const controller = new AbortController();
@@ -116,6 +118,7 @@ export function streamChat(
       tool_names: options?.toolNames ?? null,
       skill_id: options?.skillId ?? null,
       skill_auto: options?.skillAuto ?? false,
+      routing_mode: options?.routingMode ?? 'balanced',
     }),
     signal: controller.signal,
   })
@@ -146,6 +149,7 @@ export function streamChat(
             else if (evt.type === 'conversation_id') onConversationId(evt.conversation_id);
             else if (evt.type === 'tool_call') options?.onToolCall?.(evt.tool, evt.input);
             else if (evt.type === 'tool_result') options?.onToolResult?.(evt.tool, evt.output);
+            else if (evt.type === 'route') options?.onRoute?.({ model: evt.model, provider: evt.provider, reason: evt.reason });
             else if (evt.type === 'done') onDone();
             else if (evt.type === 'error') onError(evt.message);
           } catch {

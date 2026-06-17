@@ -14,3 +14,4 @@ dist/
 .DS_Store
 Reference/
 api.txt
+.playwright-mcp/

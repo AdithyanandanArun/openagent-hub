@@ -22,3 +22,4 @@ class Provider(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="providers")
+    keys = relationship("ProviderKey", back_populates="provider", cascade="all, delete-orphan")

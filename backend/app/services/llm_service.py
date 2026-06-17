@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.provider_config import ProviderConfig
+from app.core import crypto
 from uuid import UUID
 from fastapi import HTTPException
 
@@ -27,7 +28,9 @@ def update_provider_config(
 
     config.name = name
     config.base_url = base_url
-    config.api_key = api_key
+    # A masked key echoed back from the UI must not overwrite the real secret.
+    if "…" not in api_key:
+        config.api_key = crypto.encrypt(api_key)
     config.model = model
     db.commit()
     db.refresh(config)

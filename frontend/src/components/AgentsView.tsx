@@ -267,13 +267,28 @@ export function AgentsView({
                 onMouseDown={(e) => { e.preventDefault(); setModelOpen((o) => !o); }}
                 className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 transition-colors"
               >
-                <span className="max-w-[160px] truncate">{selected.model || 'Select model'}</span>
+                {selected.model === 'auto' && <Zap size={11} className="text-amber-400 flex-shrink-0" />}
+                <span className="max-w-[160px] truncate">{selected.model === 'auto' ? 'Auto' : (selected.model || 'Select model')}</span>
                 <ChevronDown size={11} className={clsx('transition-transform', modelOpen && 'rotate-180')} />
               </button>
               {modelOpen && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setModelOpen(false)} />
                   <div className="absolute top-full left-0 mt-1 w-72 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 max-h-72 overflow-y-auto py-1">
+                    {modelGroups.length > 0 && (
+                      <button
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); setSelected({ model: 'auto', providerId: null }); setModelOpen(false); }}
+                        className={clsx('w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 border-b border-zinc-700',
+                          selected.model === 'auto' ? 'bg-zinc-700 text-white' : 'text-zinc-200 hover:bg-zinc-700')}
+                      >
+                        <Zap size={13} className="text-amber-400 flex-shrink-0" />
+                        <span className="flex-1">
+                          Auto
+                          <span className="block text-[10px] text-zinc-500">Smart routing — best model per task</span>
+                        </span>
+                      </button>
+                    )}
                     {modelGroups.length === 0 ? (
                       <p className="text-zinc-500 text-xs px-3 py-3">No models — open Settings → Providers to add one.</p>
                     ) : modelGroups.map((g) => (

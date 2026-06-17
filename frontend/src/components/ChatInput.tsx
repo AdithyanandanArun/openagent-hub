@@ -8,10 +8,11 @@ import { Skill } from '../services/skills';
 import { AgentTool, AgentMode } from '../services/agents';
 import { ToolPicker, ToolMode } from './ToolPicker';
 import { SkillPicker } from './SkillPicker';
+import { RoutingPicker, RoutingMode } from './RoutingPicker';
 import { SlashCommandMenu, SlashCommand, SlashMenuHandle } from './SlashCommandMenu';
 
 interface Props {
-  onSend: (message: string, attachmentIds: string[], opts: { toolMode: ToolMode; toolNames: string[]; skillId: string | null; skillAuto: boolean }) => void;
+  onSend: (message: string, attachmentIds: string[], opts: { toolMode: ToolMode; toolNames: string[]; skillId: string | null; skillAuto: boolean; routingMode: RoutingMode }) => void;
   onStop: () => void;
   isStreaming: boolean;
   disabled?: boolean;
@@ -101,12 +102,14 @@ function ModelPicker({
 
   const flatModels = !hasProviders ? (availableModels.length > 0 ? availableModels : model ? [model] : []) : [];
   const isEmpty = hasProviders ? groups.length === 0 : flatModels.length === 0;
+  const isAuto = model === 'auto';
 
   return (
     <div ref={ref} className="relative">
       <button type="button" onMouseDown={handleMouseDown}
         className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors rounded-md px-1.5 py-1 hover:bg-zinc-700">
-        <span className="max-w-[140px] truncate">{model || 'Select model'}</span>
+        {isAuto && <Zap size={11} className="text-amber-400 flex-shrink-0" />}
+        <span className="max-w-[140px] truncate">{isAuto ? 'Auto' : (model || 'Select model')}</span>
         <ChevronDown size={11} className={clsx('transition-transform flex-shrink-0', open && 'rotate-180')} />
       </button>
 
@@ -114,6 +117,18 @@ function ModelPicker({
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute bottom-full left-0 mb-1 w-72 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+            {hasProviders && (
+              <button type="button"
+                onMouseDown={(e) => { e.preventDefault(); onChange('auto', null); setOpen(false); }}
+                className={clsx('w-full text-left px-3 py-2 text-sm transition-colors flex items-center gap-2 border-b border-zinc-700',
+                  isAuto ? 'bg-zinc-700 text-white' : 'text-zinc-200 hover:bg-zinc-700')}>
+                <Zap size={13} className="text-amber-400 flex-shrink-0" />
+                <span className="flex-1">
+                  Auto
+                  <span className="block text-[10px] text-zinc-500">Smart routing — best model per task</span>
+                </span>
+              </button>
+            )}
             {isEmpty ? (
               <p className="text-zinc-500 text-xs px-3 py-3">No models — open Settings → Providers to add one.</p>
             ) : hasProviders ? (
@@ -165,6 +180,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
   // Empty = all tools available; non-empty restricts to the selected tools.
   const [toolNames, setToolNames] = useState<string[]>([]);
   const [skillId, setSkillId] = useState<string>('auto');
+  const [routingMode, setRoutingMode] = useState<RoutingMode>('balanced');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const slashRef = useRef<SlashMenuHandle>(null);
@@ -201,6 +217,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
       toolNames,
       skillId: skillId === 'auto' || skillId === '' ? null : skillId,
       skillAuto: skillId === 'auto',
+      routingMode,
     });
   };
 
@@ -279,6 +296,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
               <Paperclip size={15} className={uploading ? 'animate-pulse' : ''} />
             </button>
             <ModelPicker model={model} availableModels={availableModels} providerModels={providerModels} catalog={catalog} onChange={onModelChange} />
+            <RoutingPicker mode={routingMode} onMode={setRoutingMode} placement="up" />
 
             {/* Tools: Off / Auto / Always + optional per-tool restriction */}
             <ToolPicker

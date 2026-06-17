@@ -34,19 +34,26 @@ export function useProviders() {
   const loadAllModels = useCallback(async (list?: Provider[]) => {
     const target = list ?? providers;
     const enabled = target.filter((p) => p.enabled);
-    const results = await Promise.allSettled(
-      enabled.map(async (p) => {
-        const models = await fetchProviderModels(p.id);
-        return models.map((m): ProviderModel => ({
-          provider_id: p.id,
-          provider_name: p.name,
-          model: m,
-        }));
-      })
-    );
+    // Fetch providers' model lists with a small concurrency cap. Firing every
+    // provider at once can trip free-tier rate limits (a burst of /models calls
+    // → a 429 → a noisy 502); a cap of 3 keeps loads smooth and quiet.
+    const CONCURRENCY = 3;
     const all: ProviderModel[] = [];
-    for (const r of results) {
-      if (r.status === 'fulfilled') all.push(...r.value);
+    for (let i = 0; i < enabled.length; i += CONCURRENCY) {
+      const batch = enabled.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map(async (p) => {
+          const models = await fetchProviderModels(p.id);
+          return models.map((m): ProviderModel => ({
+            provider_id: p.id,
+            provider_name: p.name,
+            model: m,
+          }));
+        })
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled') all.push(...r.value);
+      }
     }
     setProviderModels(all);
     return all;

@@ -18,8 +18,17 @@ from app.services.provider_service import (
     get_provider,
 )
 
+from app.services.provider_presets import preset_dicts
+
 router = APIRouter(prefix="/providers", tags=["providers"])
 security = HTTPBearer()
+
+
+@router.get("/presets")
+def get_presets():
+    """Known provider quick-add presets (base URL, free-tier notes). Public —
+    no secrets, used to populate the Add Provider form."""
+    return preset_dicts()
 
 
 def _current_user(
@@ -93,4 +102,14 @@ async def get_provider_models(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        # Upstream slow/down: fall back to the last-synced catalog for this
+        # provider so the model picker degrades gracefully instead of erroring.
+        from app.models.model_catalog import ModelCatalog
+        cached = (
+            db.query(ModelCatalog)
+            .filter(ModelCatalog.user_id == user.id, ModelCatalog.provider_id == provider_id, ModelCatalog.is_free == True)
+            .all()
+        )
+        if cached:
+            return {"models": [c.model_id for c in cached], "stale": True}
         raise HTTPException(status_code=502, detail=f"Failed to fetch models: {e}")

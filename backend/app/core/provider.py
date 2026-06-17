@@ -3,6 +3,18 @@ from typing import AsyncIterator
 import httpx
 
 
+def _auth_headers(api_key: str | None) -> dict:
+    """Build request headers, omitting Authorization when there's no key.
+
+    Keyless free providers (e.g. LLM7, local Ollama) reject `Bearer ` with an
+    empty value — httpx raises 'Illegal header value' — so we must drop the
+    header entirely rather than send a blank token."""
+    headers = {"Content-Type": "application/json"}
+    if api_key and api_key.strip():
+        headers["Authorization"] = f"Bearer {api_key.strip()}"
+    return headers
+
+
 async def stream_chat(
     base_url: str,
     api_key: str,
@@ -10,10 +22,7 @@ async def stream_chat(
     messages: list[dict],
     temperature: float = 0.7,
 ) -> AsyncIterator[str]:
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _auth_headers(api_key)
     payload = {
         "model": model,
         "messages": messages,
@@ -55,10 +64,7 @@ async def chat_completion(
 ) -> dict:
     """Non-streaming chat completion. Returns the assistant message dict
     (which may contain `content` and/or `tool_calls`). Used by the agent runtime."""
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = _auth_headers(api_key)
     payload: dict = {
         "model": model,
         "messages": messages,
@@ -75,7 +81,16 @@ async def chat_completion(
             headers=headers,
             json=payload,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            # Surface the upstream error body — providers explain *why* a 400
+            # happened (bad tool schema, unsupported field, etc.); swallowing it
+            # makes failures undebuggable.
+            body = response.text[:500]
+            raise httpx.HTTPStatusError(
+                f"HTTP {response.status_code}: {body}",
+                request=response.request,
+                response=response,
+            )
         data = response.json()
         choices = data.get("choices")
         if not choices:
@@ -87,7 +102,7 @@ async def chat_completion(
 
 
 async def fetch_models(base_url: str, api_key: str) -> list[str]:
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = _auth_headers(api_key)
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(f"{base_url}/models", headers=headers)
         response.raise_for_status()

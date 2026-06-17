@@ -6,7 +6,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Wrench, Terminal, CheckCircle2 } from 'lucide-react';
+import { Wrench, Terminal, CheckCircle2, Zap } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { ConversationDetail } from '../services/chat';
 
@@ -21,6 +21,7 @@ interface Props {
   isStreaming: boolean;
   streamingContent: string;
   streamingTools?: ToolActivity[];
+  routeInfo?: { model: string; provider?: string | null; reason?: string } | null;
   thinkingLabel?: string;
   error: string | null;
   onEditMessage?: (messageId: string, newContent: string) => void;
@@ -60,7 +61,19 @@ function ToolActivityStrip({ tools }: { tools: ToolActivity[] }) {
   );
 }
 
-export function ChatWindow({ conversation, isStreaming, streamingContent, streamingTools = [], thinkingLabel = 'Thinking', error, onEditMessage, onRegenerate }: Props) {
+function RouteChip({ info }: { info: { model: string; provider?: string | null; reason?: string } }) {
+  return (
+    <div className="px-4 pb-1">
+      <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300/90">
+        <Zap size={11} className="text-amber-400 flex-shrink-0" />
+        <span className="font-medium">Auto → {info.model}</span>
+        {info.reason && <span className="text-amber-300/60">· {info.reason}</span>}
+      </div>
+    </div>
+  );
+}
+
+export function ChatWindow({ conversation, isStreaming, streamingContent, streamingTools = [], routeInfo, thinkingLabel = 'Thinking', error, onEditMessage, onRegenerate }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true); // true = auto-scroll to bottom
@@ -138,6 +151,7 @@ export function ChatWindow({ conversation, isStreaming, streamingContent, stream
           );
         })}
 
+        {routeInfo && <RouteChip info={routeInfo} />}
         {isStreaming && <ToolActivityStrip tools={streamingTools} />}
 
         {isStreaming && streamingContent && (

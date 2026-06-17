@@ -31,6 +31,7 @@ export function ChatPage({ user, onLogout }: Props) {
     isStreaming,
     streamingContent,
     streamingTools,
+    routeInfo,
     error,
     loadConversations,
     selectConversation,
@@ -83,6 +84,15 @@ export function ChatPage({ user, onLogout }: Props) {
     if (config?.model && !selectedModel) setSelectedModel(config.model);
   }, [config, selectedModel]);
 
+  // If routing providers are configured but nothing is selected yet, default to
+  // "Auto" (smart routing) so a first message never 400s on an empty model.
+  useEffect(() => {
+    if (!selectedModel && !config?.model && providerModels.length > 0) {
+      setSelectedModel('auto');
+      setSelectedProviderId(null);
+    }
+  }, [providerModels, selectedModel, config]);
+
   const handleModelChange = (model: string, providerId?: string | null) => {
     setSelectedModel(model);
     setSelectedProviderId(providerId ?? null);
@@ -91,7 +101,7 @@ export function ChatPage({ user, onLogout }: Props) {
   const handleSend = (
     message: string,
     attachmentIds: string[],
-    opts?: { useTools?: boolean; toolMode?: 'off' | 'auto' | 'always'; toolNames?: string[]; skillId?: string | null; skillAuto?: boolean },
+    opts?: { useTools?: boolean; toolMode?: 'off' | 'auto' | 'always'; toolNames?: string[]; skillId?: string | null; skillAuto?: boolean; routingMode?: string },
   ) => {
     setThinkingLabel(attachmentIds.length > 0 ? 'Analysing' : 'Thinking');
     sendMessage(
@@ -221,6 +231,7 @@ export function ChatPage({ user, onLogout }: Props) {
               isStreaming={isStreaming}
               streamingContent={streamingContent}
               streamingTools={streamingTools}
+              routeInfo={routeInfo}
               thinkingLabel={thinkingLabel}
               error={error}
               onEditMessage={(id, content) => editMessage(id, content, selectedModel || null, selectedProviderId)}
