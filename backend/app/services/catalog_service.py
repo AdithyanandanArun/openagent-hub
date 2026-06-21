@@ -100,9 +100,14 @@ def backfill_classification(db: Session, user_id: UUID) -> int:
 # --------------------------------------------------------------------------- #
 
 def get_catalog(db: Session, user_id: UUID, free_only: bool = True) -> list[ModelCatalog]:
-    q = db.query(ModelCatalog).filter(
-        ModelCatalog.user_id == user_id,
-        ModelCatalog.is_enabled == True,
+    q = (
+        db.query(ModelCatalog)
+        .join(Provider, Provider.id == ModelCatalog.provider_id)
+        .filter(
+            ModelCatalog.user_id == user_id,
+            ModelCatalog.is_enabled == True,
+            Provider.enabled == True,
+        )
     )
     if free_only:
         q = q.filter(ModelCatalog.is_free == True)

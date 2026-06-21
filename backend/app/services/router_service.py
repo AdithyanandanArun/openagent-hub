@@ -252,11 +252,13 @@ def _ordered_providers(
         .order_by(Provider.priority, Provider.created_at)
         .all()
     )
-    if preferred_provider_id:
-        providers = sorted(
-            providers,
-            key=lambda p: (str(p.id) != preferred_provider_id, p.priority),
-        )
+
+    def _sort_key(p: Provider):
+        is_preferred = 0 if (preferred_provider_id and str(p.id) == preferred_provider_id) else 1
+        is_healthy = 0 if p.circuit_state in (None, "closed", "half_open") else 1
+        return (is_preferred, is_healthy, p.priority or 0)
+
+    providers.sort(key=_sort_key)
     return providers
 
 

@@ -17,10 +17,12 @@ model + priority-ordered failover (this module returns an empty list).
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.models.provider import Provider
 from app.services.catalog_service import get_catalog
 
 AUTO_MODEL = "auto"
@@ -160,6 +162,41 @@ def _score(entry, profile: dict, routing_mode: str = "balanced") -> tuple[float,
     return score, reasons
 
 
+def _provider_health(db: Session, user_id: UUID) -> dict[str, Provider]:
+    """Load all enabled providers keyed by str(id) for health checks."""
+    return {
+        str(p.id): p
+        for p in db.query(Provider).filter(
+            Provider.user_id == user_id, Provider.enabled == True
+        ).all()
+    }
+
+
+def _health_penalty(provider: Provider | None) -> tuple[float, str | None]:
+    """Return (penalty, reason) based on live provider health.
+
+    Penalty is subtracted from the model score. A very large penalty
+    effectively pushes the model to the bottom of the failover order."""
+    if provider is None:
+        return 100.0, "provider missing"
+
+    if provider.circuit_state == "open":
+        if provider.cooldown_until and datetime.utcnow() < provider.cooldown_until:
+            return 50.0, "circuit open"
+
+    if provider.status == "rate_limited":
+        return 20.0, "rate limited"
+
+    failures = provider.consecutive_failures or 0
+    if failures >= 3:
+        return 30.0, f"{failures} consecutive failures"
+    if failures > 0:
+        if provider.last_error_at and (datetime.utcnow() - provider.last_error_at) < timedelta(minutes=2):
+            return failures * 8.0, "recent failure"
+
+    return 0.0, None
+
+
 def choose_models(
     db: Session,
     user_id: UUID,
@@ -177,18 +214,29 @@ def choose_models(
         return []
 
     profile = _profile(messages, has_image)
+    providers = _provider_health(db, user_id)
 
     scored: list[tuple[float, list[str], object]] = []
     for e in catalog:
+        prov = providers.get(str(e.provider_id))
+        if prov is None:
+            continue
+
         s, reasons = _score(e, profile, routing_mode)
         if s < 0:
-            continue  # hard-disqualified
+            continue
+
+        penalty, penalty_reason = _health_penalty(prov)
+        if penalty > 0:
+            s -= penalty
+            if penalty_reason:
+                reasons.append(penalty_reason)
+
         scored.append((s, reasons, e))
 
     if not scored:
         return []
 
-    # Sort by score desc; light bias toward the preferred provider as tie-break.
     def sort_key(item):
         s, _reasons, e = item
         pref = 0 if (preferred_provider_id and str(e.provider_id) == preferred_provider_id) else 1
