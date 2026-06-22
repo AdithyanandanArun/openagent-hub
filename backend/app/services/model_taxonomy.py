@@ -40,13 +40,20 @@ MODEL_FAMILIES: dict[str, FamilyProfile] = {
     "codegemma":   FamilyProfile(4, 7, False, False, 8_192,   0),
 
     # --- Google Gemini ---
+    "gemini-3.5":  FamilyProfile(10, 10, True, True,  1_000_000, 0),
+    "gemini-3.1":  FamilyProfile(9, 9, True,  True,  1_000_000, 0),
+    "gemini-3":    FamilyProfile(9, 9, True,  True,  1_000_000, 0),
     "gemini-2.5":  FamilyProfile(9, 9, True,  True,  1_000_000, 0),
     "gemini-2.0":  FamilyProfile(8, 8, False, True,  1_000_000, 0),
     "gemini-1.5":  FamilyProfile(8, 8, False, True,  1_000_000, 0),
-    "gemini-3":    FamilyProfile(9, 9, True,  True,  1_000_000, 0),
     "gemini":      FamilyProfile(7, 7, False, True,  1_000_000, 0),
 
     # --- Qwen ---
+    "qwen3-coder": FamilyProfile(8, 10, True,  False, 1_000_000, 0),
+    "qwen3.6":     FamilyProfile(8, 8, True,  True,  131_072, 0),
+    "qwen3.5":     FamilyProfile(8, 8, True,  False, 131_072, 0),
+    "qwen3-next":  FamilyProfile(8, 8, True,  False, 262_144, 0),
+    "qwen3-vl":    FamilyProfile(7, 7, True,  True,  131_072, 0),
     "qwen3":       FamilyProfile(7, 7, True,  False, 131_072, 0),
     "qwen2.5-coder": FamilyProfile(6, 9, False, False, 131_072, 0),
     "qwen2.5":     FamilyProfile(7, 7, False, False, 131_072, 0),
@@ -57,19 +64,21 @@ MODEL_FAMILIES: dict[str, FamilyProfile] = {
     "qwen":        FamilyProfile(5, 5, False, False, 32_768,  0),
 
     # --- Mistral ---
-    "mistral-large":  FamilyProfile(8, 8, False, False, 131_072, 0),
-    "mistral-medium": FamilyProfile(7, 7, False, False, 32_768,  0),
-    "mistral-small":  FamilyProfile(6, 6, False, False, 32_768,  0),
+    "mistral-large":  FamilyProfile(8, 8, False, True,  256_000, 0),
+    "mistral-medium": FamilyProfile(7, 7, False, True,  256_000, 0),
+    "mistral-small":  FamilyProfile(6, 6, False, True,  256_000, 0),
     "mistral-nemo":   FamilyProfile(6, 6, False, False, 131_072, 0),
+    "magistral":      FamilyProfile(8, 8, True,  False, 40_960,  -1),
     "pixtral-large":  FamilyProfile(8, 7, False, True,  131_072, 0),
     "pixtral":        FamilyProfile(6, 6, False, True,  131_072, 0),
-    "codestral":      FamilyProfile(6, 9, False, False, 32_768,  0),
+    "codestral":      FamilyProfile(6, 9, False, False, 256_000, 0),
     "mixtral":        FamilyProfile(6, 6, False, False, 32_768,  -1),
     "mistral":        FamilyProfile(5, 5, False, False, 32_768,  0),
 
     # --- DeepSeek ---
+    "deepseek-v4":       FamilyProfile(9, 9, False, False, 1_000_000, 0),
     "deepseek-r1":       FamilyProfile(9, 9, True,  False, 65_536,  -2),
-    "deepseek-v3":       FamilyProfile(8, 8, False, False, 65_536,  0),
+    "deepseek-v3":       FamilyProfile(8, 8, False, False, 131_072, 0),
     "deepseek-v2.5":     FamilyProfile(7, 8, False, False, 65_536,  0),
     "deepseek-coder":    FamilyProfile(6, 8, False, False, 16_384,  0),
     "deepseek":          FamilyProfile(6, 6, False, False, 65_536,  0),
@@ -81,12 +90,17 @@ MODEL_FAMILIES: dict[str, FamilyProfile] = {
     "phi-2":       FamilyProfile(4, 5, False, False, 2_048,   +1),
     "phi":         FamilyProfile(3, 4, False, False, 2_048,   +1),
 
-    # --- Cohere Command ---
+    # --- Cohere Command / Aya / North ---
+    "command-a-plus":  FamilyProfile(9, 8, False, True,  128_000, 0),
+    "command-a":       FamilyProfile(8, 7, False, False, 256_000, 0),
     "command-r-plus":  FamilyProfile(8, 7, False, False, 131_072, 0),
     "command-r7b":     FamilyProfile(5, 5, False, False, 131_072, 0),
     "command-r":       FamilyProfile(6, 6, False, False, 131_072, 0),
-    "command-a":       FamilyProfile(8, 7, False, False, 256_000, 0),
     "command":         FamilyProfile(5, 5, False, False, 4_096,   0),
+    "aya-expanse":     FamilyProfile(6, 5, False, False, 131_072, 0),
+    "aya-vision":      FamilyProfile(6, 5, False, True,  16_384,  0),
+    "aya":             FamilyProfile(5, 5, False, False, 8_192,   0),
+    "north":           FamilyProfile(7, 8, False, False, 256_000, 0),
 
     # --- Yi ---
     "yi-1.5":      FamilyProfile(6, 6, False, False, 32_768, 0),
@@ -145,6 +159,7 @@ MODEL_FAMILIES: dict[str, FamilyProfile] = {
     "sonar":      FamilyProfile(7, 6, False, False, 131_072, 0),
 
     # --- NVIDIA Nemotron ---
+    "nemotron-3": FamilyProfile(9, 9, False, False, 1_000_000, 0),
     "nemotron":   FamilyProfile(7, 7, False, False, 131_072, 0),
 
     # --- Dolphin ---
@@ -296,6 +311,18 @@ MODEL_FAMILIES: dict[str, FamilyProfile] = {
 
     # --- OLMo (AllenAI) ---
     "olmo":        FamilyProfile(6, 6, True,  False, 131_072, 0),
+
+    # --- Poolside Laguna ---
+    "laguna":      FamilyProfile(7, 8, False, False, 262_144, 0),
+
+    # --- Nex-AGI ---
+    "nex":         FamilyProfile(7, 7, False, True,  262_144, 0),
+
+    # --- OpenRouter OWL ---
+    "owl":         FamilyProfile(7, 7, False, False, 1_000_000, 0),
+
+    # --- Big-Pickle (OpenCode Zen) ---
+    "big-pickle":  FamilyProfile(7, 7, False, False, 131_072, 0),
 }
 
 _SORTED_KEYS = sorted(MODEL_FAMILIES.keys(), key=len, reverse=True)
@@ -343,8 +370,8 @@ def extract_param_billions(model_id: str) -> float | None:
 def extract_family(model_id: str) -> str | None:
     mid = model_id.lower()
     if "/" in mid:
-        mid = mid.split("/", 1)[1]
-    if mid.startswith("models/"):
+        mid = mid.rsplit("/", 1)[1]
+    if mid.startswith("models-"):
         mid = mid[7:]
     for key in _SORTED_KEYS:
         if mid.startswith(key) or f"-{key}" in mid:
@@ -409,7 +436,7 @@ def classify_model(model_id: str, provider_name: str | None = None) -> dict:
 
     # Vision
     vision = fp.vision_capable
-    if any(x in mid for x in ("vision", "-vl", "vl-", "visual", "llava", "pixtral", "image")):
+    if any(x in mid for x in ("vision", "-vl", "vl-", "visual", "llava", "pixtral", "image", "-omni")):
         vision = True
 
     # Reasoning

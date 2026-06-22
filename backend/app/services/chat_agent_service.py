@@ -105,6 +105,7 @@ async def _stream_turn_with_failover(db, user_id, model, messages, tools, prefer
         raise RuntimeError("No enabled providers configured.")
     last_error = "All providers failed."
     buffered: list[dict] = []
+    had_tool_error = False
 
     for attempt_model, provider in attempts:
         if _is_circuit_open(provider):
@@ -129,10 +130,33 @@ async def _stream_turn_with_failover(db, user_id, model, messages, tools, prefer
             error_msg = f"Provider '{provider.name}' HTTP {status}: {body_text}"
             _record_failure(db, provider, error_msg, status)
             last_error = error_msg
+            if status == 400 and tools:
+                bl = body_text.lower()
+                if any(kw in bl for kw in ("tool", "function", "not support", "unsupported")):
+                    had_tool_error = True
         except Exception as exc:  # noqa: BLE001
             error_msg = f"Provider '{provider.name}' error: {exc}"
             _record_failure(db, provider, error_msg)
             last_error = error_msg
+
+    if had_tool_error and tools:
+        for attempt_model, provider in attempts:
+            if _is_circuit_open(provider):
+                continue
+            buffered.clear()
+
+            async def _buffer_retry(evt):
+                buffered.append(evt)
+
+            try:
+                result = await _stream_one_turn(provider, attempt_model, messages, None, _buffer_retry, "auto")
+                _record_success(db, provider)
+                for evt in buffered:
+                    await on_event(evt)
+                return result
+            except Exception:
+                continue
+
     raise RuntimeError(last_error)
 
 

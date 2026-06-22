@@ -66,7 +66,7 @@ def _record_success(db: Session, provider: Provider) -> None:
     db.commit()
 
 
-NON_FAULT_STATUS_CODES = {408, 413}
+NON_FAULT_STATUS_CODES = {400, 401, 403, 404, 408, 413}
 
 def _record_failure(db: Session, provider: Provider, error: str, status_code: int | None = None) -> None:
     if status_code in NON_FAULT_STATUS_CODES:

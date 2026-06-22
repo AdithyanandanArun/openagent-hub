@@ -7,6 +7,7 @@ Only FREE models are stored and routed.
 from datetime import datetime
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.model_catalog import ModelCatalog
@@ -29,9 +30,30 @@ def _is_model_free(model_id: str, provider_name: str) -> bool:
 # Sync helpers                                                                 #
 # --------------------------------------------------------------------------- #
 
+_NON_CHAT_PATTERNS = (
+    "embed", "rerank", "tts", "stt", "asr", "whisper", "speech",
+    "guard", "safeguard", "moderation", "ocr", "transcri",
+    "dall-e", "stable-diffusion", "image-gen",
+    "imagen", "veo-", "lyria", "generate-001", "generate-preview",
+)
+
+
+def _is_chat_model(model_id: str) -> bool:
+    mid = model_id.lower()
+    return not any(p in mid for p in _NON_CHAT_PATTERNS)
+
+
 def sync_provider_models(db: Session, user_id: UUID, provider: Provider, model_ids: list[str]) -> None:
     now = datetime.utcnow()
+    seen: set[str] = set()
     for mid in model_ids:
+        if mid in seen:
+            continue
+        seen.add(mid)
+
+        if not _is_chat_model(mid):
+            continue
+
         free = _is_model_free(mid, provider.name)
         if not free:
             continue
@@ -68,7 +90,22 @@ def sync_provider_models(db: Session, user_id: UUID, provider: Provider, model_i
                 last_seen_at=now,
                 **caps,
             )
-            db.add(entry)
+            try:
+                with db.begin_nested():
+                    db.add(entry)
+            except IntegrityError:
+                pass
+    for stale in (
+        db.query(ModelCatalog)
+        .filter(
+            ModelCatalog.user_id == user_id,
+            ModelCatalog.provider_id == provider.id,
+            ModelCatalog.is_enabled == True,
+        )
+        .all()
+    ):
+        if not _is_chat_model(stale.model_id):
+            stale.is_enabled = False
     db.commit()
 
 

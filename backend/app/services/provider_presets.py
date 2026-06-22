@@ -242,10 +242,13 @@ def filter_free_model_objects(
 ) -> list[str]:
     """Return free model ids from a list of model objects (or bare id strings).
 
-    Two gates, both applied: (1) drop objects whose own metadata marks them paid
-    (`tier: pro`, `pricing > 0`, `free: false`) — works for ALL providers; (2)
-    apply the preset's name-pattern free rule (`:free`, `-free`, …)."""
+    Two gates: (1) for providers with per-model free rules (suffix/contains),
+    drop objects whose own metadata marks them paid (`tier: pro`, `pricing > 0`,
+    `free: false`); (2) apply the preset's name-pattern free rule.
+    Quota-gated providers (free_mode="all") skip the paid-object check since
+    their pricing metadata doesn't reflect actual cost to the user."""
     preset = find_preset(name=name, base_url=base_url)
+    skip_paid_check = preset and preset.free_mode == "all"
     kept: list[str] = []
     saw_any_id = False
     for m in models:
@@ -254,7 +257,7 @@ def filter_free_model_objects(
             paid = False
         elif isinstance(m, dict):
             mid = m.get("id") or m.get("name")
-            paid = _is_paid_object(m)
+            paid = False if skip_paid_check else _is_paid_object(m)
         else:
             continue
         if not mid:
