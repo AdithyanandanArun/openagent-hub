@@ -9,11 +9,18 @@ WORKDIR /app
 #  - nodejs/npm (via NodeSource): run npm-based MCP servers with npx
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc git curl ca-certificates gnupg \
+        # Chromium dependencies for Playwright MCP
+        libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
+        libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 \
+        libpango-1.0-0 libcairo2 libx11-xcb1 libxcb-dri3-0 \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Pre-install Playwright and download Chromium so the MCP server starts instantly
+RUN npx -y playwright install chromium 2>/dev/null || true
 
 # uv / uvx: run Python-based MCP servers without a venv juggling step
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
