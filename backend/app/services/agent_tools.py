@@ -103,6 +103,80 @@ async def _h_current_time(ctx: ToolContext, args: dict) -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+async def _h_web_search(ctx: ToolContext, args: dict) -> str:
+    import re
+    from urllib.parse import parse_qs, urlparse, unquote
+    import httpx as _httpx
+    query = str(args.get("query", "")).strip()
+    if not query:
+        return "Error: query is required."
+    max_results = min(int(args.get("max_results", 5)), 10)
+    try:
+        async with _httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            resp = await client.get(
+                "https://lite.duckduckgo.com/lite/",
+                params={"q": query},
+                headers={"User-Agent": "Mozilla/5.0 (compatible; OpenAgentHub/1.0)"},
+            )
+            html = resp.text
+
+        def _strip(t: str) -> str:
+            t = re.sub(r"<[^>]+>", "", t)
+            for ent, ch in [("&amp;", "&"), ("&quot;", '"'), ("&#x27;", "'"), ("&lt;", "<"), ("&gt;", ">")]:
+                t = t.replace(ent, ch)
+            return t.strip()
+
+        def _extract_url(href: str) -> str:
+            href = href.replace("&amp;", "&")
+            qs = parse_qs(urlparse(href).query)
+            if "uddg" in qs:
+                return unquote(qs["uddg"][0])
+            return href
+
+        # DDG lite: href uses double quotes, class uses single quotes
+        link_matches = re.findall(r'href="([^"]+)"[^>]*class=\'result-link\'[^>]*>([^<]+)<', html)
+        snippets_raw = re.findall(r"class='result-snippet'[^>]*>(.*?)</td>", html, re.DOTALL)
+
+        results = []
+        for i, (href, title) in enumerate(link_matches[:max_results]):
+            url = _extract_url(href)
+            snippet = _strip(snippets_raw[i]) if i < len(snippets_raw) else ""
+            results.append(f"{i+1}. **{_strip(title)}**\n   {url}\n   {snippet}")
+
+        if not results:
+            return f"No results found for '{query}'."
+        return f"Search results for: {query}\n\n" + "\n\n".join(results)
+    except Exception as exc:
+        return f"Search error: {exc}"
+
+
+async def _h_web_fetch(ctx: ToolContext, args: dict) -> str:
+    import httpx as _httpx
+    url = str(args.get("url", "")).strip()
+    if not url:
+        return "Error: url is required."
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        async with _httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.get(
+                f"https://r.jina.ai/{url}",
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; OpenAgentHub/1.0)",
+                    "Accept": "text/plain, text/markdown",
+                    "X-Return-Format": "markdown",
+                },
+            )
+            resp.raise_for_status()
+            content = resp.text
+        max_chars = int(args.get("max_chars", 8000))
+        if len(content) > max_chars:
+            content = content[:max_chars] + f"\n\n[...truncated at {max_chars} chars]"
+        return content
+    except Exception as exc:
+        return f"Fetch error: {exc}"
+
+
 async def _h_remember(ctx: ToolContext, args: dict) -> str:
     content = str(args.get("content", "")).strip()
     if not content:
@@ -141,6 +215,32 @@ async def _h_recall(ctx: ToolContext, args: dict) -> str:
 
 
 BUILTIN_TOOLS: dict[str, ToolDef] = {
+    "web_search": ToolDef(
+        name="web_search",
+        description="Search the web using DuckDuckGo. Returns titles, URLs, and snippets for the top results. Use for current events, facts, or any information that may not be in training data.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query"},
+                "max_results": {"type": "integer", "description": "Number of results to return (1-10, default 5)", "default": 5},
+            },
+            "required": ["query"],
+        },
+        handler=_h_web_search,
+    ),
+    "web_fetch": ToolDef(
+        name="web_fetch",
+        description="Fetch a URL and return its content as clean markdown. Handles JavaScript-rendered pages. Use to read articles, docs, or any web page.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to fetch"},
+                "max_chars": {"type": "integer", "description": "Max characters to return (default 8000)", "default": 8000},
+            },
+            "required": ["url"],
+        },
+        handler=_h_web_fetch,
+    ),
     "calculate": ToolDef(
         name="calculate",
         description="Evaluate a basic arithmetic expression (e.g. '2 * (3 + 4)'). Use for any math.",
