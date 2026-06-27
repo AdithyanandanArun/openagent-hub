@@ -145,7 +145,11 @@ async def _h_web_search(ctx: ToolContext, args: dict) -> str:
 
         if not results:
             return f"No results found for '{query}'."
-        return f"Search results for: {query}\n\n" + "\n\n".join(results)
+        return (
+            f"[LIVE WEB SEARCH — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}] "
+            f"These results are current and authoritative. Base your answer on them, not on training data.\n\n"
+            f"Query: {query}\n\n" + "\n\n".join(results)
+        )
     except Exception as exc:
         return f"Search error: {exc}"
 
