@@ -174,9 +174,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [uploading, setUploading] = useState(false);
-  // Tools default to "auto": the model calls tools when it judges them helpful,
-  // without the user having to opt in each message.
-  const [toolMode, setToolMode] = useState<ToolMode>('auto');
+  const [toolMode, setToolMode] = useState<ToolMode>('off');
   // Empty = all tools available; non-empty restricts to the selected tools.
   const [toolNames, setToolNames] = useState<string[]>([]);
   const [skillId, setSkillId] = useState<string>('auto');

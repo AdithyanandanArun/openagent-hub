@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Wrench, Check } from 'lucide-react';
+import { Wrench, Check, Minus } from 'lucide-react';
 import clsx from 'clsx';
 import { AgentTool } from '../services/agents';
 
@@ -12,19 +12,7 @@ interface Props {
   selected: string[];
   onSelected: (names: string[]) => void;
   tools: AgentTool[];
-  /** Which way the dropdown opens. Chat input sits at the bottom (up); the agent
-   *  composer sits at the top (down). */
   placement?: 'up' | 'down';
-}
-
-/** Friendly label for a tool name: "mcp__GitHub__create_issue" → "GitHub · create_issue". */
-function prettyTool(name: string): string {
-  if (name.startsWith('mcp__')) {
-    const rest = name.slice(5);
-    const i = rest.indexOf('__');
-    if (i >= 0) return `${rest.slice(0, i)} · ${rest.slice(i + 2)}`;
-  }
-  return name;
 }
 
 const MODES: { v: ToolMode; label: string; desc: string }[] = [
@@ -33,17 +21,51 @@ const MODES: { v: ToolMode; label: string; desc: string }[] = [
   { v: 'off', label: 'Off', desc: 'Never use tools' },
 ];
 
+/** Group tools by source: MCP server name or "Built-in". */
+function groupTools(tools: AgentTool[]): { name: string; toolNames: string[] }[] {
+  const groups: Record<string, string[]> = {};
+  for (const t of tools) {
+    let group = 'Built-in';
+    if (t.name.startsWith('mcp__')) {
+      const rest = t.name.slice(5);
+      const i = rest.indexOf('__');
+      group = i >= 0 ? rest.slice(0, i) : rest;
+    }
+    (groups[group] ??= []).push(t.name);
+  }
+  return Object.entries(groups).map(([name, toolNames]) => ({ name, toolNames }));
+}
+
 export function ToolPicker({ mode, onMode, selected, onSelected, tools, placement = 'up' }: Props) {
   const [open, setOpen] = useState(false);
+  const groups = groupTools(tools);
 
-  const toggleTool = (name: string) => {
-    onSelected(selected.includes(name) ? selected.filter((n) => n !== name) : [...selected, name]);
+  const toggleGroup = (toolNames: string[]) => {
+    const allOn = toolNames.every((n) => selected.includes(n));
+    if (allOn) {
+      // deselect this group
+      onSelected(selected.filter((n) => !toolNames.includes(n)));
+    } else {
+      // select all in group (union)
+      const next = new Set(selected);
+      toolNames.forEach((n) => next.add(n));
+      onSelected([...next]);
+    }
   };
+
+  const groupState = (toolNames: string[]): 'all' | 'some' | 'none' => {
+    const on = toolNames.filter((n) => selected.includes(n)).length;
+    if (on === toolNames.length) return 'all';
+    if (on > 0) return 'some';
+    return 'none';
+  };
+
+  const selectedGroupCount = groups.filter((g) => groupState(g.toolNames) !== 'none').length;
 
   const label =
     mode === 'off'
       ? 'Tools'
-      : `Tools: ${mode === 'auto' ? 'Auto' : 'Always'}${selected.length > 0 ? ` (${selected.length})` : ''}`;
+      : `Tools: ${mode === 'auto' ? 'Auto' : 'Always'}${selectedGroupCount > 0 ? ` (${selectedGroupCount})` : ''}`;
 
   return (
     <div className="relative">
@@ -61,7 +83,7 @@ export function ToolPicker({ mode, onMode, selected, onSelected, tools, placemen
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={clsx('absolute left-0 w-64 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 py-1',
+          <div className={clsx('absolute left-0 w-56 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 py-1',
             placement === 'up' ? 'bottom-full mb-1' : 'top-full mt-1')}>
             {/* Mode */}
             {MODES.map((o) => (
@@ -77,8 +99,8 @@ export function ToolPicker({ mode, onMode, selected, onSelected, tools, placemen
               </button>
             ))}
 
-            {/* Tool checklist */}
-            {mode !== 'off' && tools.length > 0 && (
+            {/* Server-level checklist */}
+            {mode !== 'off' && groups.length > 0 && (
               <>
                 <div className="my-1 border-t border-zinc-700/60" />
                 <div className="flex items-center justify-between px-3 pt-1 pb-1">
@@ -89,27 +111,31 @@ export function ToolPicker({ mode, onMode, selected, onSelected, tools, placemen
                   )}
                 </div>
                 <div className="max-h-48 overflow-y-auto">
-                  {tools.map((t) => {
-                    const checked = selected.includes(t.name);
+                  {groups.map(({ name, toolNames }) => {
+                    const state = groupState(toolNames);
                     return (
                       <button
-                        key={t.name}
+                        key={name}
                         type="button"
-                        onMouseDown={(e) => { e.preventDefault(); toggleTool(t.name); }}
-                        title={t.description || t.name}
+                        onMouseDown={(e) => { e.preventDefault(); toggleGroup(toolNames); }}
+                        title={`${toolNames.length} tool${toolNames.length !== 1 ? 's' : ''}`}
                         className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 text-zinc-300 hover:bg-zinc-700"
                       >
                         <span className={clsx('w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0',
-                          checked ? 'bg-amber-500 border-amber-500 text-black' : 'border-zinc-600')}>
-                          {checked && <Check size={10} strokeWidth={3} />}
+                          state === 'all' ? 'bg-amber-500 border-amber-500 text-black'
+                          : state === 'some' ? 'bg-amber-950/60 border-amber-600 text-amber-400'
+                          : 'border-zinc-600')}>
+                          {state === 'all' && <Check size={10} strokeWidth={3} />}
+                          {state === 'some' && <Minus size={10} strokeWidth={3} />}
                         </span>
-                        <span className="truncate font-mono">{prettyTool(t.name)}</span>
+                        <span className="flex-1 truncate">{name}</span>
+                        <span className="text-zinc-600 text-[10px]">{toolNames.length}</span>
                       </button>
                     );
                   })}
                 </div>
                 <p className="text-[10px] text-zinc-600 px-3 pt-1 pb-0.5">
-                  {selected.length === 0 ? 'No limit — all tools available.' : `Restricted to ${selected.length} tool(s).`}
+                  {selected.length === 0 ? 'No limit — all tools available.' : `${selectedGroupCount} source${selectedGroupCount !== 1 ? 's' : ''} selected.`}
                 </p>
               </>
             )}
