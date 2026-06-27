@@ -242,6 +242,21 @@ async def chat_stream(
             # Couldn't resolve (no catalog / single-provider config) — fall back.
             model = provider.model or model
 
+    # web_search and web_fetch are always injected as grounding tools regardless
+    # of the user's tool mode setting. When tools are "off", only these two are
+    # offered so the model can answer questions about current events without the
+    # user having to manually enable tools.
+    ALWAYS_ON_TOOLS = ["web_search", "web_fetch"]
+    if tool_mode == "off":
+        effective_tool_mode = "auto"
+        effective_allowed = ALWAYS_ON_TOOLS
+    else:
+        effective_tool_mode = tool_mode
+        if allowed_tool_names:
+            effective_allowed = list(set(allowed_tool_names) | set(ALWAYS_ON_TOOLS))
+        else:
+            effective_allowed = None  # None = all tools
+
     async def generate():
         full_response = ""
         timer = RequestTimer()
@@ -250,32 +265,21 @@ async def chat_stream(
             if route_info:
                 yield f"data: {json.dumps(route_info)}\n\n"
 
-            if use_tools:
-                from app.services.chat_agent_service import stream_chat_with_tools
-                async for evt in stream_chat_with_tools(
-                    user_id=user_id,
-                    base_url=base_url,
-                    api_key=api_key,
-                    model=model,
-                    messages=messages,
-                    preferred_provider_id=preferred_provider_id,
-                    allowed_tool_names=allowed_tool_names,
-                    tool_mode=tool_mode,
-                    model_order=model_order,
-                ):
-                    if evt.get("type") == "chunk":
-                        full_response += evt["content"]
-                    yield f"data: {json.dumps(evt)}\n\n"
-            else:
-                with SessionLocal() as stream_db:
-                    if use_router:
-                        chunks = route_chat(stream_db, user_id, model, messages, preferred_provider_id, model_order=model_order, has_image=has_image)
-                    else:
-                        chunks = stream_chat(base_url=base_url, api_key=api_key, model=model, messages=messages)
-
-                    async for chunk in chunks:
-                        full_response += chunk
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+            from app.services.chat_agent_service import stream_chat_with_tools
+            async for evt in stream_chat_with_tools(
+                user_id=user_id,
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                messages=messages,
+                preferred_provider_id=preferred_provider_id,
+                allowed_tool_names=effective_allowed,
+                tool_mode=effective_tool_mode,
+                model_order=model_order,
+            ):
+                if evt.get("type") == "chunk":
+                    full_response += evt["content"]
+                yield f"data: {json.dumps(evt)}\n\n"
 
             with SessionLocal() as fresh_db:
                 add_message(fresh_db, conv_id, "assistant", full_response)
