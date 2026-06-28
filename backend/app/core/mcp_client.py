@@ -158,6 +158,51 @@ class MCPSession:
         self._proc = None
 
 
+class MCPSessionPool:
+    """Keeps MCP processes alive across multiple tool calls within one request.
+
+    Without this, every tool call spawns a fresh process. For stateful servers
+    like Playwright that is fatal — each call gets a brand-new browser with no
+    navigation history, forcing the model to re-navigate before every action.
+    """
+
+    def __init__(self) -> None:
+        self._sessions: dict[tuple, MCPSession] = {}
+
+    async def call_tool(
+        self,
+        command: str,
+        name: str,
+        arguments: dict,
+        args: list[str] | None = None,
+        env: dict | None = None,
+    ) -> str:
+        key = (command, tuple(args or []))
+        session = self._sessions.get(key)
+        # Recreate if the process has already exited.
+        if session is not None and (
+            session._proc is None or session._proc.returncode is not None
+        ):
+            try:
+                await session.close()
+            except Exception:
+                pass
+            session = None
+        if session is None:
+            session = MCPSession(command, args, env)
+            await session.__aenter__()
+            self._sessions[key] = session
+        return await session.call_tool(name, arguments)
+
+    async def close_all(self) -> None:
+        for session in self._sessions.values():
+            try:
+                await session.close()
+            except Exception:
+                pass
+        self._sessions.clear()
+
+
 def _flatten_tool_result(result: dict) -> str:
     """Convert an MCP tools/call result into a plain text string for the LLM."""
     content = result.get("content", [])

@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 from uuid import UUID
 
-from app.core.mcp_client import mcp_call_tool, MCPError
+from app.core.mcp_client import mcp_call_tool, MCPError, MCPSessionPool
 from app.models.mcp_server import MCPServer
 from app.services import memory_service
 
@@ -39,6 +39,8 @@ class ToolContext:
     spawn_fn: Optional[Callable[..., Awaitable[str]]] = None
     # Roster of saved agents the coordinator may delegate to (multi-agent teams).
     team: list[dict] = field(default_factory=list)
+    # Persistent MCP session pool — reuses processes across tool calls in one turn.
+    session_pool: Optional[MCPSessionPool] = None
 
 
 @dataclass
@@ -304,6 +306,8 @@ def _make_mcp_handler(server: MCPServer, tool_name: str) -> ToolHandler:
                 "Enable auto-approve in MCP settings to allow this call."
             )
         try:
+            if ctx.session_pool is not None:
+                return await ctx.session_pool.call_tool(command, tool_name, call_args, args=args, env=env)
             return await mcp_call_tool(command, tool_name, call_args, args=args, env=env)
         except MCPError as exc:
             return f"[mcp error] {exc}"

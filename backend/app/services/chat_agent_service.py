@@ -19,6 +19,7 @@ import httpx
 
 from app.core.database import SessionLocal
 from app.core import crypto
+from app.core.mcp_client import MCPSessionPool
 from app.core.provider import stream_chat
 from app.services import agent_tools
 from app.services.provider_service import has_enabled_providers
@@ -181,81 +182,86 @@ async def stream_chat_with_tools(
       - "auto"   : tools offered; the model calls them when it judges fit (default).
       - "always" : force a tool call on the first turn, then auto.
     """
-    with SessionLocal() as db:
-        use_router = has_enabled_providers(db, user_id)
-        registry = agent_tools.build_registry(
-            db, user_id, allow_subagents=False, allowed_tool_names=allowed_tool_names
-        )
-        tools = agent_tools.to_openai_tools(registry) if registry else None
+    pool = MCPSessionPool()
+    try:
+        with SessionLocal() as db:
+            use_router = has_enabled_providers(db, user_id)
+            registry = agent_tools.build_registry(
+                db, user_id, allow_subagents=False, allowed_tool_names=allowed_tool_names
+            )
+            tools = agent_tools.to_openai_tools(registry) if registry else None
 
-        ctx = agent_tools.ToolContext(
-            session_factory=SessionLocal,
-            user_id=user_id,
-            conversation_id=None,
-            project_id=None,
-            allow_subagents=False,
-        )
+            ctx = agent_tools.ToolContext(
+                session_factory=SessionLocal,
+                user_id=user_id,
+                conversation_id=None,
+                project_id=None,
+                allow_subagents=False,
+                session_pool=pool,
+            )
 
-        # Buffer of events produced mid-turn (the streamer pushes here).
-        pending: list[dict] = []
+            # Buffer of events produced mid-turn (the streamer pushes here).
+            pending: list[dict] = []
 
-        async def on_event(evt):
-            pending.append(evt)
+            async def on_event(evt):
+                pending.append(evt)
 
-        working = list(messages)
+            working = list(messages)
 
-        for _round in range(MAX_TOOL_ROUNDS):
-            pending.clear()
-            # "always" forces a tool call on the very first round; subsequent rounds
-            # use "auto" so the model can produce a final answer after tool results.
-            tool_choice = "required" if (tool_mode == "always" and _round == 0 and tools) else "auto"
-            if use_router:
-                message = await _stream_turn_with_failover(
-                    db, user_id, model, working, tools, preferred_provider_id, on_event, tool_choice, model_order
-                )
-            else:
-                # single-provider: wrap config into a faux provider object
-                class _P:
-                    pass
-                p = _P()
-                p.base_url, p.api_key, p.name, p.id = base_url, api_key, "Default", "default"
-                message = await _stream_one_turn(p, model, working, tools, on_event, tool_choice)
-
-            # Flush streamed chunks collected during the turn.
-            for evt in pending:
-                yield evt
-
-            tool_calls = message.get("tool_calls") or []
-            # Backfill any missing/duplicate tool_call ids before they are sent back
-            # to the provider, otherwise strict providers 400 on the next turn.
-            agent_tools.ensure_tool_call_ids(tool_calls)
-            working.append(message)
-
-            if not tool_calls:
-                return  # plain text answer streamed; done
-
-            # Execute tool calls and feed results back, then loop for the next turn.
-            for call in tool_calls:
-                fn = call.get("function", {})
-                name = fn.get("name", "")
-                args = agent_tools.parse_tool_arguments(fn.get("arguments"))
-                yield {"type": "tool_call", "tool": name, "input": args}
-                tool = registry.get(name)
-                if not tool:
-                    output = f"Error: unknown tool '{name}'"
+            for _round in range(MAX_TOOL_ROUNDS):
+                pending.clear()
+                # "always" forces a tool call on the very first round; subsequent rounds
+                # use "auto" so the model can produce a final answer after tool results.
+                tool_choice = "required" if (tool_mode == "always" and _round == 0 and tools) else "auto"
+                if use_router:
+                    message = await _stream_turn_with_failover(
+                        db, user_id, model, working, tools, preferred_provider_id, on_event, tool_choice, model_order
+                    )
                 else:
-                    try:
-                        output = await tool.handler(ctx, args)
-                    except Exception as exc:  # noqa: BLE001
-                        output = f"Error running tool '{name}': {exc}"
-                output_str = output if isinstance(output, str) else str(output)
-                yield {"type": "tool_result", "tool": name, "output": output_str}
-                working.append({
-                    "role": "tool",
-                    "tool_call_id": call.get("id", ""),
-                    "name": name,
-                    "content": output_str[:8000],
-                })
+                    # single-provider: wrap config into a faux provider object
+                    class _P:
+                        pass
+                    p = _P()
+                    p.base_url, p.api_key, p.name, p.id = base_url, api_key, "Default", "default"
+                    message = await _stream_one_turn(p, model, working, tools, on_event, tool_choice)
 
-        # Hit the round cap; emit a gentle note.
-        yield {"type": "chunk", "content": "\n\n_(stopped after using tools several times)_"}
+                # Flush streamed chunks collected during the turn.
+                for evt in pending:
+                    yield evt
+
+                tool_calls = message.get("tool_calls") or []
+                # Backfill any missing/duplicate tool_call ids before they are sent back
+                # to the provider, otherwise strict providers 400 on the next turn.
+                agent_tools.ensure_tool_call_ids(tool_calls)
+                working.append(message)
+
+                if not tool_calls:
+                    return  # plain text answer streamed; done
+
+                # Execute tool calls and feed results back, then loop for the next turn.
+                for call in tool_calls:
+                    fn = call.get("function", {})
+                    name = fn.get("name", "")
+                    args = agent_tools.parse_tool_arguments(fn.get("arguments"))
+                    yield {"type": "tool_call", "tool": name, "input": args}
+                    tool = registry.get(name)
+                    if not tool:
+                        output = f"Error: unknown tool '{name}'"
+                    else:
+                        try:
+                            output = await tool.handler(ctx, args)
+                        except Exception as exc:  # noqa: BLE001
+                            output = f"Error running tool '{name}': {exc}"
+                    output_str = output if isinstance(output, str) else str(output)
+                    yield {"type": "tool_result", "tool": name, "output": output_str}
+                    working.append({
+                        "role": "tool",
+                        "tool_call_id": call.get("id", ""),
+                        "name": name,
+                        "content": output_str[:8000],
+                    })
+
+            # Hit the round cap; emit a gentle note.
+            yield {"type": "chunk", "content": "\n\n_(stopped after using tools several times)_"}
+    finally:
+        await pool.close_all()
