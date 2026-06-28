@@ -24,7 +24,7 @@ from app.services import agent_tools
 from app.services.provider_service import has_enabled_providers
 from app.services.router_service import _ordered_providers, _is_circuit_open, _record_success, _record_failure, _resolve_attempts
 
-MAX_TOOL_ROUNDS = 5
+MAX_TOOL_ROUNDS = 25
 
 
 async def _stream_one_turn(provider, model, messages, tools, on_event, tool_choice="auto"):

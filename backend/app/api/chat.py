@@ -130,7 +130,13 @@ async def chat_stream(
     db.refresh(conv)
 
     system_prompt = (
-        "You are a helpful assistant with access to real-time web search.\n\n"
+        "You are a helpful assistant with access to real-time web search and browser tools.\n\n"
+        "## Tool Results — ABSOLUTE RULES\n"
+        "When you have tools available, you MUST use them to answer questions that require live data, browser interaction, or any information you cannot be 100% certain of from memory.\n"
+        "- Tool results are the ONLY ground truth. NEVER answer from memory when a tool can provide the real answer.\n"
+        "- NEVER fabricate, guess, or hallucinate tool output. If a tool hasn't been called yet, call it — do not invent what it would return.\n"
+        "- After receiving tool results, your answer MUST be derived exclusively from those results. Do not blend in training-data guesses.\n"
+        "- If a task requires multiple tool calls (navigate, click, screenshot, evaluate…), keep calling tools until you have every piece of data requested. Do not stop early.\n\n"
         "## Web Search — CRITICAL RULES\n"
         "You have `web_search` and `web_fetch` tools available at all times.\n"
         "- For ANY question about current events, who holds a position/office, recent news, prices, scores, dates, or ANYTHING that may have changed since your training: call `web_search` FIRST. Do NOT answer from memory.\n"
