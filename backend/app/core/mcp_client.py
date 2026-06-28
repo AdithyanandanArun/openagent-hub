@@ -45,6 +45,7 @@ class MCPSession:
                 stderr=asyncio.subprocess.PIPE,
                 env=full_env,
                 cwd=self.cwd,
+                limit=16 * 1024 * 1024,  # 16 MB — default 64 KB overflows on large pages
             )
         except FileNotFoundError as exc:
             raise MCPError(f"MCP command not found: {self.command}") from exc
