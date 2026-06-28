@@ -129,7 +129,7 @@ class MCPSession:
         result = await self._request("tools/list")
         return (result or {}).get("tools", [])
 
-    async def call_tool(self, name: str, arguments: dict, timeout: float = 60.0) -> str:
+    async def call_tool(self, name: str, arguments: dict, timeout: float = 600.0) -> str:
         result = await self._request(
             "tools/call",
             {"name": name, "arguments": arguments or {}},

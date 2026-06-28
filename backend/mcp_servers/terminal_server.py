@@ -23,7 +23,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "Shell command to execute"},
-                "timeout": {"type": "integer", "description": "Timeout in seconds (default 60)", "default": 60},
+                "timeout": {"type": "integer", "description": "Timeout in seconds (default 300)", "default": 300},
             },
             "required": ["command"],
         },
@@ -37,7 +37,7 @@ def _call_tool(name: str, args: dict) -> tuple[str, bool]:
     command = str(args.get("command", "")).strip()
     if not command:
         return "Error: command is required.", True
-    timeout = int(args.get("timeout", 60))
+    timeout = int(args.get("timeout", 300))
     try:
         result = subprocess.run(
             command,
