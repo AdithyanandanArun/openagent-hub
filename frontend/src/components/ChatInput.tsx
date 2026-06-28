@@ -182,7 +182,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
 
   // Auto-switch to Reliability routing when tools are enabled.
   useEffect(() => {
-    if (toolMode !== 'off') setRoutingMode('reliability');
+    if (toolMode !== 'off') setRoutingMode('quality');
   }, [toolMode]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
