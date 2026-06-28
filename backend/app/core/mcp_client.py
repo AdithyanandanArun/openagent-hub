@@ -64,11 +64,14 @@ class MCPSession:
         self._proc.stdin.write(line.encode("utf-8"))
         await self._proc.stdin.drain()
 
-    async def _read_message(self, timeout: float = 30.0) -> dict:
+    async def _read_message(self, timeout: float | None = 30.0) -> dict:
         assert self._proc and self._proc.stdout
         while True:
             try:
-                raw = await asyncio.wait_for(self._proc.stdout.readline(), timeout=timeout)
+                if timeout is None:
+                    raw = await self._proc.stdout.readline()
+                else:
+                    raw = await asyncio.wait_for(self._proc.stdout.readline(), timeout=timeout)
             except asyncio.TimeoutError:
                 raise MCPError("Timed out waiting for MCP server response")
             if not raw:
@@ -129,7 +132,7 @@ class MCPSession:
         result = await self._request("tools/list")
         return (result or {}).get("tools", [])
 
-    async def call_tool(self, name: str, arguments: dict, timeout: float = 600.0) -> str:
+    async def call_tool(self, name: str, arguments: dict, timeout: float | None = None) -> str:
         result = await self._request(
             "tools/call",
             {"name": name, "arguments": arguments or {}},
