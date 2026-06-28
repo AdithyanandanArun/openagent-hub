@@ -19,8 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Pre-install Playwright and download Chromium so the MCP server starts instantly
-RUN npx -y playwright install chromium 2>/dev/null || true
+# Pre-install Playwright browsers so the MCP server starts instantly without downloading
+RUN npx -y playwright install chromium chrome 2>/dev/null || npx -y playwright install chromium 2>/dev/null || true
 
 # uv / uvx: run Python-based MCP servers without a venv juggling step
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \

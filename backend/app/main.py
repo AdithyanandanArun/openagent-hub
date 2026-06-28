@@ -11,8 +11,29 @@ from app.api import (
 from app.services.health_probe import run_health_probes
 
 
+def _patch_playwright_servers():
+    """One-time migration: add --browser chromium to any Playwright MCP servers
+    that were installed before that arg was added to the catalog."""
+    from app.core.database import SessionLocal
+    from app.models.mcp_server import MCPServer
+    with SessionLocal() as db:
+        servers = db.query(MCPServer).filter(
+            MCPServer.command == "npx",
+        ).all()
+        changed = False
+        for s in servers:
+            args = list(s.args or [])
+            if "@playwright/mcp" in " ".join(args) and "--browser" not in args:
+                args += ["--browser", "chromium"]
+                s.args = args
+                changed = True
+        if changed:
+            db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _patch_playwright_servers()
     task = asyncio.create_task(run_health_probes())
     yield
     task.cancel()
