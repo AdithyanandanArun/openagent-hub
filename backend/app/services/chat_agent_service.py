@@ -13,9 +13,13 @@ Tool activity is surfaced to the client as SSE events (tool_call / tool_result)
 interleaved with normal `chunk` events, so the UI can show what's happening.
 """
 import json
+import re
 from uuid import UUID
 
 import httpx
+
+# Strips hallucinated OpenAI Assistants-style citation markers, e.g. 【3†L1-L3】
+_CITATION_RE = re.compile(r'【\d+†[^\】]*】')
 
 from app.core.database import SessionLocal
 from app.core import crypto
@@ -75,8 +79,10 @@ async def _stream_one_turn(provider, model, messages, tools, on_event, tool_choi
                     continue
 
                 if content := delta.get("content"):
-                    content_parts.append(content)
-                    await on_event({"type": "chunk", "content": content})
+                    content = _CITATION_RE.sub("", content)
+                    if content:
+                        content_parts.append(content)
+                        await on_event({"type": "chunk", "content": content})
 
                 for tc in delta.get("tool_calls", []) or []:
                     idx = tc.get("index", 0)
