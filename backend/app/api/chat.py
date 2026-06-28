@@ -265,14 +265,19 @@ async def chat_stream(
     # user having to manually enable tools.
     ALWAYS_ON_TOOLS = ["web_search", "web_fetch"]
     if tool_mode == "off":
+        # Tools are off — surface only the always-on search tools so the model
+        # can answer live questions without the user explicitly enabling tools.
         effective_tool_mode = "auto"
         effective_allowed = ALWAYS_ON_TOOLS
     else:
         effective_tool_mode = tool_mode
         if allowed_tool_names:
-            effective_allowed = list(set(allowed_tool_names) | set(ALWAYS_ON_TOOLS))
+            # User explicitly selected tools — honour that selection exactly.
+            # Do NOT inject web_search; if they picked Playwright, use Playwright.
+            effective_allowed = list(allowed_tool_names)
         else:
-            effective_allowed = None  # None = all tools
+            # No restriction — all tools including always-on are available.
+            effective_allowed = None
 
     async def generate():
         full_response = ""
