@@ -1,4 +1,4 @@
-import { useState, useRef, KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { Send, Square, Paperclip, X, FileText, Image, ChevronDown, Eye, Brain, Zap, Bot, Target, ClipboardList, Eraser } from 'lucide-react';
 import clsx from 'clsx';
 import { uploadAttachment, AttachmentMeta } from '../services/attachments';
@@ -179,6 +179,12 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
   const [toolNames, setToolNames] = useState<string[]>([]);
   const [skillId, setSkillId] = useState<string>('auto');
   const [routingMode, setRoutingMode] = useState<RoutingMode>('balanced');
+
+  // Auto-switch to Reliability routing when tools are enabled.
+  useEffect(() => {
+    if (toolMode !== 'off') setRoutingMode('reliability');
+  }, [toolMode]);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const slashRef = useRef<SlashMenuHandle>(null);
