@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openagent.fullname" . }}-config
+  labels:
+    {{- include "openagent.labels" . | nindent 4 }}
+data:
+  ENVIRONMENT: production
+  ALLOWED_ORIGINS: {{ required "config.allowedOrigins is required" .Values.config.allowedOrigins | quote }}
+  PUBLIC_APP_URL: {{ required "config.publicAppUrl is required" .Values.config.publicAppUrl | quote }}
+  ENABLE_OPENAI_COMPAT_API: "false"
+  ENABLE_CUSTOM_MCP_SERVERS: "false"
+  ENABLE_WORKSPACE_OPEN: "false"
+  STORAGE_BACKEND: gcs
+  GCS_BUCKET: {{ required "config.gcsBucket is required" .Values.config.gcsBucket | quote }}
+  GOOGLE_CLOUD_PROJECT: {{ required "config.googleCloudProject is required" .Values.config.googleCloudProject | quote }}
+  REDIS_URL: {{ required "config.redisUrl is required" .Values.config.redisUrl | quote }}
+  AUTH_REQUESTS_PER_HOUR: {{ .Values.config.authRequestsPerHour | quote }}
+  CHAT_REQUESTS_PER_MINUTE: {{ .Values.config.chatRequestsPerMinute | quote }}
+  CHAT_REQUESTS_PER_DAY: {{ .Values.config.chatRequestsPerDay | quote }}
+  MAX_CONCURRENT_CHAT_REQUESTS: {{ .Values.config.maxConcurrentChatRequests | quote }}
+  ENABLE_HEALTH_PROBES: "false"
+  EMAIL_VERIFICATION_REQUIRED: "true"
+  EMAIL_DELIVERY_MODE: resend
+  EMAIL_FROM: {{ required "config.emailFrom is required" .Values.config.emailFrom | quote }}
+  RUN_MIGRATIONS: "false"

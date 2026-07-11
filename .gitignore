@@ -15,3 +15,11 @@ dist/
 Reference/
 api.txt
 .playwright-mcp/
+
+# Terraform keeps state locally only for individual experiments. Production state
+# belongs in the configured remote backend, never in Git.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log

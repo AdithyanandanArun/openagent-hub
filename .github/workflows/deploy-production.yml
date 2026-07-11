@@ -1,0 +1,92 @@
+name: Deploy production
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: openagent-production
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION }}
+  GKE_CLUSTER: ${{ vars.GKE_CLUSTER }}
+  GKE_NAMESPACE: openagent
+  ARTIFACT_REPOSITORY: ${{ vars.ARTIFACT_REPOSITORY }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: azure/setup-helm@v4
+
+      - name: Configure Docker and cluster access
+        run: |
+          gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+          gcloud container clusters get-credentials "$GKE_CLUSTER" --region "$GCP_REGION"
+
+      - name: Build and push immutable images
+        id: images
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          BACKEND_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}/openagent-backend:${SHA}"
+          FRONTEND_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}/openagent-frontend:${SHA}"
+          docker build --tag "$BACKEND_IMAGE" ./backend
+          docker build --tag "$FRONTEND_IMAGE" ./frontend
+          docker push "$BACKEND_IMAGE"
+          docker push "$FRONTEND_IMAGE"
+          echo "backend=$BACKEND_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "frontend=$FRONTEND_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy chart and run migrations
+        env:
+          BACKEND_IMAGE: ${{ steps.images.outputs.backend }}
+          FRONTEND_IMAGE: ${{ steps.images.outputs.frontend }}
+          PUBLIC_HOST: ${{ vars.PUBLIC_HOST }}
+          GCP_APP_SERVICE_ACCOUNT: ${{ vars.GCP_APP_SERVICE_ACCOUNT }}
+          GCS_BUCKET: ${{ vars.GCS_BUCKET }}
+          REDIS_INSTANCE: ${{ vars.REDIS_INSTANCE }}
+          INGRESS_STATIC_IP_NAME: ${{ vars.INGRESS_STATIC_IP_NAME }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          DATABASE_URL_SECRET: ${{ vars.DATABASE_URL_SECRET }}
+          SECRET_KEY_SECRET: ${{ vars.SECRET_KEY_SECRET }}
+          ENCRYPTION_KEY_SECRET: ${{ vars.ENCRYPTION_KEY_SECRET }}
+          RESEND_API_KEY_SECRET: ${{ vars.RESEND_API_KEY_SECRET }}
+        run: |
+          REDIS_HOST=$(gcloud redis instances describe "$REDIS_INSTANCE" --region "$GCP_REGION" --format='value(host)')
+          helm upgrade --install openagent ./helm/openagent \
+            --namespace "$GKE_NAMESPACE" --create-namespace --wait --timeout 15m \
+            --set-string backend.image.repository="${BACKEND_IMAGE%:*}" \
+            --set-string backend.image.tag="${BACKEND_IMAGE##*:}" \
+            --set-string frontend.image.repository="${FRONTEND_IMAGE%:*}" \
+            --set-string frontend.image.tag="${FRONTEND_IMAGE##*:}" \
+            --set-string serviceAccount.gcpServiceAccount="$GCP_APP_SERVICE_ACCOUNT" \
+            --set-string config.allowedOrigins="https://${PUBLIC_HOST}" \
+            --set-string config.publicAppUrl="https://${PUBLIC_HOST}" \
+            --set-string config.gcsBucket="$GCS_BUCKET" \
+            --set-string config.googleCloudProject="$GCP_PROJECT_ID" \
+            --set-string config.redisUrl="redis://${REDIS_HOST}:6379/0" \
+            --set-string config.emailFrom="$EMAIL_FROM" \
+            --set-string ingress.host="$PUBLIC_HOST" \
+            --set-string ingress.staticIpName="$INGRESS_STATIC_IP_NAME" \
+            --set-string secrets.resources.databaseUrl="projects/${GCP_PROJECT_ID}/secrets/${DATABASE_URL_SECRET}/versions/latest" \
+            --set-string secrets.resources.secretKey="projects/${GCP_PROJECT_ID}/secrets/${SECRET_KEY_SECRET}/versions/latest" \
+            --set-string secrets.resources.encryptionKey="projects/${GCP_PROJECT_ID}/secrets/${ENCRYPTION_KEY_SECRET}/versions/latest" \
+            --set-string secrets.resources.resendApiKey="projects/${GCP_PROJECT_ID}/secrets/${RESEND_API_KEY_SECRET}/versions/latest"

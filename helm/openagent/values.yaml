@@ -1,0 +1,68 @@
+nameOverride: ""
+fullnameOverride: ""
+
+backend:
+  replicaCount: 3
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: "2", memory: 2Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 70
+
+frontend:
+  replicaCount: 2
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+serviceAccount:
+  name: openagent
+  gcpServiceAccount: ""
+
+secrets:
+  # Uses GKE's Secret Manager add-on. Secret values never enter Helm or Git.
+  enabled: true
+  kubernetesSecretName: openagent-runtime
+  resources:
+    databaseUrl: ""
+    secretKey: ""
+    encryptionKey: ""
+    resendApiKey: ""
+
+config:
+  allowedOrigins: ""
+  publicAppUrl: ""
+  gcsBucket: ""
+  googleCloudProject: ""
+  redisUrl: ""
+  emailFrom: ""
+  authRequestsPerHour: 20
+  chatRequestsPerMinute: 20
+  chatRequestsPerDay: 500
+  maxConcurrentChatRequests: 2
+
+ingress:
+  enabled: true
+  className: gce
+  host: ""
+  staticIpName: ""
+  managedCertificateName: openagent-cert
+
+healthProbe:
+  schedule: "*/10 * * * *"

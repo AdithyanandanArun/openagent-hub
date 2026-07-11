@@ -270,6 +270,101 @@ Public API replicas use Redis for authentication throttling, per-user chat
 limits, daily quotas, and concurrent streaming limits. Provider health checks
 must run once through `python -m app.health_probe_runner`, not in every replica.
 
+## Public deployment (GKE)
+
+Phase 3 adds a production deployment path for a browser-only public beta. It
+uses a regional private-node GKE Autopilot cluster, Cloud NAT, a private GCS
+bucket for attachments, Standard HA Memorystore Redis, Artifact Registry,
+Secret Manager, a GKE managed TLS certificate, and GitHub Actions workload
+identity federation. Supabase remains the managed PostgreSQL provider; no
+Supabase credentials are stored in this repository.
+
+The supplied Terraform intentionally creates secret *containers*, not secret
+versions. This prevents Terraform state, Helm values, GitHub Actions logs, and
+Git from ever receiving the database URL, encryption material, or Resend key.
+
+### 1. Provision cloud resources
+
+Authenticate with an administrator account, copy the example variables, and
+apply Terraform. Configure a versioned remote GCS backend in
+[`infrastructure/terraform/versions.tf`](infrastructure/terraform/versions.tf)
+before sharing the state with a team.
+
+```bash
+cd infrastructure/terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit only project/resource identifiers; do not add secret values.
+terraform init
+terraform apply
+```
+
+Record these outputs: `cluster_name`, `attachments_bucket`,
+`ingress_static_ip_name`, `ingress_ip_address`, `application_service_account`,
+`github_actions_service_account`, `github_workload_identity_provider`, and
+`secret_resource_names`.
+
+### 2. Add runtime secret versions
+
+Create the values interactively (or from a trusted secret-management workflow),
+never in a shell history, `.tfvars`, Helm values file, or GitHub variable. The
+database URL must be the Supabase PostgreSQL URL with TLS required; use the
+pooled connection endpoint where appropriate for the selected Supabase plan.
+
+```bash
+gcloud secrets versions add openagent-production-database-url --data-file=-
+gcloud secrets versions add openagent-production-secret-key --data-file=-
+gcloud secrets versions add openagent-production-encryption-key --data-file=-
+gcloud secrets versions add openagent-production-resend-api-key --data-file=-
+```
+
+The encryption key is a base64-encoded 32-byte value. For example, generate it
+locally with `openssl rand -base64 32`; retain the prior key only in your
+external recovery process until all data encrypted with it has been rotated.
+
+### 3. Configure DNS and GitHub deployment variables
+
+Create an `A` record for the intended public hostname (for example,
+`app.example.com`) pointing to Terraform's `ingress_ip_address`. Set these
+repository or `production` environment variables in GitHub:
+
+| Variable | Source |
+|---|---|
+| `GCP_PROJECT_ID`, `GCP_REGION`, `GKE_CLUSTER`, `ARTIFACT_REPOSITORY` | Terraform inputs/outputs |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOYER_SERVICE_ACCOUNT` | Terraform outputs |
+| `GCP_APP_SERVICE_ACCOUNT`, `GCS_BUCKET`, `INGRESS_STATIC_IP_NAME` | Terraform outputs |
+| `REDIS_INSTANCE` | `openagent-production-redis`, unless renamed |
+| `PUBLIC_HOST`, `EMAIL_FROM` | Your verified domain and Resend sender |
+| `DATABASE_URL_SECRET`, `SECRET_KEY_SECRET`, `ENCRYPTION_KEY_SECRET`, `RESEND_API_KEY_SECRET` | The four Terraform-created Secret Manager secret IDs |
+
+The GitHub OIDC provider is restricted by Terraform to the
+`github_repository` value, so set it to the exact `owner/repository` that will
+run deployments. The deployer has Artifact Registry write and GKE admin access;
+keep the GitHub `production` environment protected with required reviewers.
+
+### 4. Deploy and verify
+
+Push a signed/reviewed tag beginning with `v`, or run the **Deploy production**
+workflow manually. It builds immutable images, pushes them to Artifact Registry,
+runs the Helm pre-upgrade migration job, and waits for the deployment.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+
+kubectl -n openagent get pods,ingress,managedcertificate
+kubectl -n openagent get cronjob
+```
+
+Wait until the `ManagedCertificate` is `Active`, then open
+`https://<PUBLIC_HOST>`. GKE's Secret Manager CSI add-on mounts and syncs the
+runtime secrets only inside workload pods; the GCS bucket stays private and all
+attachment downloads continue through application authorization.
+
+The chart lives in [`helm/openagent`](helm/openagent) and requires values for
+the image references, public hostname, GCP service account, Redis URL, and
+Secret Manager resource names. The CI workflow renders it with representative
+non-secret values on every pull request.
+
 ---
 
 ## License

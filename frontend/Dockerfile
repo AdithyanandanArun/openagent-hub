@@ -6,8 +6,11 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-FROM nginx:alpine
+FROM nginxinc/nginx-unprivileged:1.27-alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
+# The base image renders this template with BACKEND_HOST at container start.
+# Docker Compose uses the default; Helm supplies its namespaced Service name.
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+ENV BACKEND_HOST=backend
+EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

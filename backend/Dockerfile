@@ -44,6 +44,14 @@ COPY . .
 
 RUN chmod +x /app/entrypoint.sh
 
+# Public API pods run without root. The MCP caches and workspace are the only
+# runtime-writeable paths and are owned by the application user.
+RUN groupadd --system app \
+    && useradd --system --gid app --create-home app \
+    && chown -R app:app /app /opt/mcp
+
 EXPOSE 8000
+
+USER app
 
 ENTRYPOINT ["/app/entrypoint.sh"]
