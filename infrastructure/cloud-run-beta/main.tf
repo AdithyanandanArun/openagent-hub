@@ -81,7 +81,7 @@ resource "google_secret_manager_secret_iam_member" "runtime" {
 
 resource "google_iam_workload_identity_pool" "github" {
   workload_identity_pool_id = "${local.prefix}-github"
-  display_name              = "OpenAgent Hub beta GitHub Actions"
+  display_name              = "OpenAgent beta GitHub"
 }
 
 resource "google_iam_workload_identity_pool_provider" "github" {
