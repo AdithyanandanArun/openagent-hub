@@ -30,6 +30,8 @@ def create_verification_token(db: Session, user: User) -> str:
 
 
 def register_user(db: Session, data: RegisterRequest) -> User:
+    if settings.INVITE_ONLY and str(data.email).lower() not in settings.invited_emails:
+        raise HTTPException(status_code=403, detail="Registration is currently invite only")
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     if db.query(User).filter(User.username == data.username).first():

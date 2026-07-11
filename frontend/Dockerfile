@@ -12,5 +12,6 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # Docker Compose uses the default; Helm supplies its namespaced Service name.
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 ENV BACKEND_HOST=backend
+ENV PORT=8080
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

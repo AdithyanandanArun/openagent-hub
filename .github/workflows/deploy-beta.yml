@@ -1,0 +1,93 @@
+name: Deploy beta
+
+on:
+  push:
+    tags: ["beta-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: openagent-beta
+  cancel-in-progress: false
+
+env:
+  BETA_GCP_PROJECT_ID: ${{ vars.BETA_GCP_PROJECT_ID }}
+  BETA_GCP_REGION: ${{ vars.BETA_GCP_REGION }}
+  BETA_ARTIFACT_REPOSITORY: ${{ vars.BETA_ARTIFACT_REPOSITORY }}
+  BETA_RUNTIME_SERVICE_ACCOUNT: ${{ vars.BETA_RUNTIME_SERVICE_ACCOUNT }}
+  BETA_GCS_BUCKET: ${{ vars.BETA_GCS_BUCKET }}
+  BETA_PUBLIC_APP_URL: ${{ vars.BETA_PUBLIC_APP_URL }}
+  BETA_EMAIL_FROM: ${{ vars.BETA_EMAIL_FROM }}
+  BETA_DATABASE_URL_SECRET: ${{ vars.BETA_DATABASE_URL_SECRET }}
+  BETA_SECRET_KEY_SECRET: ${{ vars.BETA_SECRET_KEY_SECRET }}
+  BETA_ENCRYPTION_KEY_SECRET: ${{ vars.BETA_ENCRYPTION_KEY_SECRET }}
+  BETA_RESEND_API_KEY_SECRET: ${{ vars.BETA_RESEND_API_KEY_SECRET }}
+  BETA_REDIS_URL_SECRET: ${{ vars.BETA_REDIS_URL_SECRET }}
+  BETA_INVITED_EMAILS_SECRET: ${{ vars.BETA_INVITED_EMAILS_SECRET }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: beta
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check beta configuration
+        run: |
+          required=(BETA_GCP_PROJECT_ID BETA_GCP_REGION BETA_ARTIFACT_REPOSITORY BETA_RUNTIME_SERVICE_ACCOUNT BETA_GCS_BUCKET BETA_PUBLIC_APP_URL BETA_EMAIL_FROM BETA_DATABASE_URL_SECRET BETA_SECRET_KEY_SECRET BETA_ENCRYPTION_KEY_SECRET BETA_RESEND_API_KEY_SECRET BETA_REDIS_URL_SECRET BETA_INVITED_EMAILS_SECRET)
+          for key in "${required[@]}"; do
+            if [ -z "${!key}" ]; then echo "Missing GitHub variable: $key"; exit 1; fi
+          done
+          case "$BETA_PUBLIC_APP_URL" in https://*) ;; *) echo "BETA_PUBLIC_APP_URL must be HTTPS"; exit 1;; esac
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.BETA_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.BETA_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Select beta project
+        run: gcloud config set project "$BETA_GCP_PROJECT_ID"
+
+      - name: Build and publish immutable images
+        id: images
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          gcloud auth configure-docker "${BETA_GCP_REGION}-docker.pkg.dev" --quiet
+          BACKEND_IMAGE="${BETA_GCP_REGION}-docker.pkg.dev/${BETA_GCP_PROJECT_ID}/${BETA_ARTIFACT_REPOSITORY}/openagent-backend:${SHA}"
+          FRONTEND_IMAGE="${BETA_GCP_REGION}-docker.pkg.dev/${BETA_GCP_PROJECT_ID}/${BETA_ARTIFACT_REPOSITORY}/openagent-frontend:${SHA}"
+          docker build --tag "$BACKEND_IMAGE" ./backend
+          docker build --tag "$FRONTEND_IMAGE" ./frontend
+          docker push "$BACKEND_IMAGE"
+          docker push "$FRONTEND_IMAGE"
+          echo "backend=$BACKEND_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "frontend=$FRONTEND_IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Render Cloud Run manifests
+        env:
+          BACKEND_IMAGE: ${{ steps.images.outputs.backend }}
+          FRONTEND_IMAGE: ${{ steps.images.outputs.frontend }}
+        run: |
+          mkdir -p /tmp/openagent-beta
+          for manifest in service.yaml migrate-job.yaml health-job.yaml; do
+            envsubst < "deployment/cloud-run-beta/$manifest" > "/tmp/openagent-beta/$manifest"
+          done
+          if grep -RE "\$BETA_|\$BACKEND_IMAGE|\$FRONTEND_IMAGE" /tmp/openagent-beta; then
+            echo "Manifest rendering left an unresolved deployment value."; exit 1
+          fi
+
+      - name: Run database migrations
+        run: |
+          gcloud run jobs replace /tmp/openagent-beta/migrate-job.yaml --region "$BETA_GCP_REGION"
+          gcloud run jobs execute openagent-beta-migrate --region "$BETA_GCP_REGION" --wait
+
+      - name: Deploy public beta service and health job
+        run: |
+          gcloud run services replace /tmp/openagent-beta/service.yaml --region "$BETA_GCP_REGION"
+          gcloud run services add-iam-policy-binding openagent-beta --region "$BETA_GCP_REGION" --member="allUsers" --role="roles/run.invoker"
+          gcloud run jobs replace /tmp/openagent-beta/health-job.yaml --region "$BETA_GCP_REGION"

@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     EMAIL_DELIVERY_MODE: str = "console"  # console | resend
     RESEND_API_KEY: Optional[str] = None
     EMAIL_FROM: Optional[str] = None
+    INVITE_ONLY: bool = False
+    # Comma-separated normalized email addresses. Store this in a secret
+    # manager in public beta deployments so the invited-user list is private.
+    INVITED_EMAILS: str = ""
     # AES-256-GCM key for encrypting provider API keys at rest. 32 bytes,
     # base64-encoded. If unset, derived deterministically from SECRET_KEY via
     # HKDF so existing single-secret deploys keep working.
@@ -46,6 +50,10 @@ class Settings(BaseSettings):
     @property
     def allowed_origins(self) -> list[str]:
         return [origin.strip().rstrip("/") for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def invited_emails(self) -> set[str]:
+        return {email.strip().lower() for email in self.INVITED_EMAILS.split(",") if email.strip()}
 
     def validate_runtime(self) -> None:
         """Fail closed when a public deployment is missing required controls."""
@@ -67,6 +75,8 @@ class Settings(BaseSettings):
             self.EMAIL_DELIVERY_MODE != "resend" or not self.RESEND_API_KEY or not self.EMAIL_FROM
         ):
             errors.append("Resend email delivery (RESEND_API_KEY and EMAIL_FROM) is required")
+        if self.INVITE_ONLY and not self.invited_emails:
+            errors.append("INVITED_EMAILS is required when INVITE_ONLY=true")
         if self.ENABLE_OPENAI_COMPAT_API:
             errors.append("ENABLE_OPENAI_COMPAT_API must be false for the browser-only public beta")
         if self.ENABLE_CUSTOM_MCP_SERVERS:

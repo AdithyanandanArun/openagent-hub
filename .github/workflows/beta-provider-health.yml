@@ -1,0 +1,25 @@
+name: Run beta provider health checks
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: beta
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.BETA_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.BETA_DEPLOYER_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Select beta project
+        run: gcloud config set project "${{ vars.BETA_GCP_PROJECT_ID }}"
+      - name: Run the one-shot health job
+        run: gcloud run jobs execute openagent-beta-provider-health --region "${{ vars.BETA_GCP_REGION }}" --wait

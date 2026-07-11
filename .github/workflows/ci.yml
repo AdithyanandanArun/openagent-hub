@@ -34,7 +34,9 @@ jobs:
         with:
           terraform_version: 1.9.8
       - name: Check Terraform formatting
-        run: terraform -chdir=infrastructure/terraform fmt -check -recursive
+        run: |
+          terraform -chdir=infrastructure/terraform fmt -check -recursive
+          terraform -chdir=infrastructure/cloud-run-beta fmt -check -recursive
 
       - uses: azure/setup-helm@v4
       - name: Render Helm chart

@@ -1,0 +1,110 @@
+# Rendered by .github/workflows/deploy-beta.yml with non-secret GitHub variables.
+# All values prefixed with $ are substituted at deployment time; secret contents
+# stay in Secret Manager and are never rendered into this file.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: openagent-beta
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+        run.googleapis.com/container-dependencies: '{"frontend":["backend"]}'
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 10
+      timeoutSeconds: 900
+      serviceAccountName: $BETA_RUNTIME_SERVICE_ACCOUNT
+      containers:
+        # The first container is the public Cloud Run ingress container.
+        - name: frontend
+          image: $FRONTEND_IMAGE
+          ports:
+            - name: http1
+              containerPort: 8080
+          startupProbe:
+            tcpSocket: { port: 8080 }
+            periodSeconds: 3
+            timeoutSeconds: 1
+            failureThreshold: 20
+          resources:
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          env:
+            - name: BACKEND_HOST
+              value: 127.0.0.1
+        - name: backend
+          image: $BACKEND_IMAGE
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 3
+            timeoutSeconds: 1
+            failureThreshold: 20
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: ALLOWED_ORIGINS
+              value: $BETA_PUBLIC_APP_URL
+            - name: PUBLIC_APP_URL
+              value: $BETA_PUBLIC_APP_URL
+            - name: ENABLE_OPENAI_COMPAT_API
+              value: "false"
+            - name: ENABLE_CUSTOM_MCP_SERVERS
+              value: "false"
+            - name: ENABLE_WORKSPACE_OPEN
+              value: "false"
+            - name: STORAGE_BACKEND
+              value: gcs
+            - name: GCS_BUCKET
+              value: $BETA_GCS_BUCKET
+            - name: GOOGLE_CLOUD_PROJECT
+              value: $BETA_GCP_PROJECT_ID
+            - name: AUTH_REQUESTS_PER_HOUR
+              value: "20"
+            - name: CHAT_REQUESTS_PER_MINUTE
+              value: "20"
+            - name: CHAT_REQUESTS_PER_DAY
+              value: "500"
+            - name: MAX_CONCURRENT_CHAT_REQUESTS
+              value: "2"
+            - name: ENABLE_HEALTH_PROBES
+              value: "false"
+            - name: EMAIL_VERIFICATION_REQUIRED
+              value: "true"
+            - name: EMAIL_DELIVERY_MODE
+              value: resend
+            - name: EMAIL_FROM
+              value: $BETA_EMAIL_FROM
+            - name: INVITE_ONLY
+              value: "true"
+            - name: RUN_MIGRATIONS
+              value: "false"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: $BETA_DATABASE_URL_SECRET, key: latest }
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: $BETA_SECRET_KEY_SECRET, key: latest }
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef: { name: $BETA_ENCRYPTION_KEY_SECRET, key: latest }
+            - name: RESEND_API_KEY
+              valueFrom:
+                secretKeyRef: { name: $BETA_RESEND_API_KEY_SECRET, key: latest }
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: $BETA_REDIS_URL_SECRET, key: latest }
+            - name: INVITED_EMAILS
+              valueFrom:
+                secretKeyRef: { name: $BETA_INVITED_EMAILS_SECRET, key: latest }
