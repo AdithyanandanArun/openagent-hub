@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     ENABLE_OPENAI_COMPAT_API: bool = True
     ENABLE_CUSTOM_MCP_SERVERS: bool = True
     ENABLE_WORKSPACE_OPEN: bool = True
+    STORAGE_BACKEND: str = "local"  # local | gcs
+    GCS_BUCKET: Optional[str] = None
+    GOOGLE_CLOUD_PROJECT: Optional[str] = None
+    REDIS_URL: Optional[str] = None
+    AUTH_REQUESTS_PER_HOUR: int = 20
+    CHAT_REQUESTS_PER_MINUTE: int = 20
+    CHAT_REQUESTS_PER_DAY: int = 500
+    MAX_CONCURRENT_CHAT_REQUESTS: int = 2
+    ENABLE_HEALTH_PROBES: bool = True
 
     # Public registrations require a verification email. Development can use the
     # console delivery mode so contributors do not need a third-party account.
@@ -64,6 +73,12 @@ class Settings(BaseSettings):
             errors.append("ENABLE_CUSTOM_MCP_SERVERS must be false until MCP sandboxing is implemented")
         if self.ENABLE_WORKSPACE_OPEN:
             errors.append("ENABLE_WORKSPACE_OPEN must be false in production")
+        if self.STORAGE_BACKEND != "gcs" or not self.GCS_BUCKET:
+            errors.append("STORAGE_BACKEND=gcs and GCS_BUCKET are required in production")
+        if not self.REDIS_URL:
+            errors.append("REDIS_URL is required in production")
+        if self.ENABLE_HEALTH_PROBES:
+            errors.append("ENABLE_HEALTH_PROBES must be false in API replicas; use the health-probe job")
         if errors:
             raise RuntimeError("Invalid production configuration: " + "; ".join(errors))
 

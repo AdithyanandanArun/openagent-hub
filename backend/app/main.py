@@ -36,9 +36,10 @@ def _patch_playwright_servers():
 async def lifespan(app: FastAPI):
     settings.validate_runtime()
     _patch_playwright_servers()
-    task = asyncio.create_task(run_health_probes())
+    task = asyncio.create_task(run_health_probes()) if settings.ENABLE_HEALTH_PROBES else None
     yield
-    task.cancel()
+    if task:
+        task.cancel()
 
 
 app = FastAPI(title="OpenAgent Hub", version="0.1.0", lifespan=lifespan)

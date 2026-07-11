@@ -251,11 +251,24 @@ EMAIL_DELIVERY_MODE=resend
 RESEND_API_KEY=...
 EMAIL_FROM=OpenAgent Hub <accounts@example.com>
 RUN_MIGRATIONS=false
+STORAGE_BACKEND=gcs
+GCS_BUCKET=openagent-hub-production-attachments
+GOOGLE_CLOUD_PROJECT=your-gcp-project
+REDIS_URL=redis://your-managed-redis:6379/0
+ENABLE_HEALTH_PROBES=false
 ```
 
 Run Alembic separately as a one-shot deployment job. New accounts must verify
 their email before they can sign in; existing installations are marked verified
 by migration `014` to avoid locking out current users.
+
+Attachments use local storage in development and private Google Cloud Storage in
+production. The application authorizes every download; do not make the bucket
+or its objects public.
+
+Public API replicas use Redis for authentication throttling, per-user chat
+limits, daily quotas, and concurrent streaming limits. Provider health checks
+must run once through `python -m app.health_probe_runner`, not in every replica.
 
 ---
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -12,13 +12,15 @@ from app.services.auth_service import (
 )
 from app.services.email_service import send_verification_email
 from app.core.config import settings
+from app.services.rate_limit_service import check_auth_request
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer()
 
 
 @router.post("/register", response_model=MessageResponse, status_code=201)
-def register(data: RegisterRequest, db: Session = Depends(get_db)):
+def register(data: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+    check_auth_request(request.client.host if request.client else "unknown", "register")
     user = register_user(db, data)
     if settings.EMAIL_VERIFICATION_REQUIRED:
         token = create_verification_token(db, user)
@@ -28,7 +30,8 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(data: LoginRequest, db: Session = Depends(get_db)):
+def login(data: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    check_auth_request(request.client.host if request.client else "unknown", "login")
     token = login_user(db, data.email, data.password)
     return TokenResponse(access_token=token)
 
@@ -40,7 +43,8 @@ def verify_email_address(data: VerifyEmailRequest, db: Session = Depends(get_db)
 
 
 @router.post("/resend-verification", response_model=MessageResponse)
-def resend_verification_email(data: ResendVerificationRequest, db: Session = Depends(get_db)):
+def resend_verification_email(data: ResendVerificationRequest, request: Request, db: Session = Depends(get_db)):
+    check_auth_request(request.client.host if request.client else "unknown", "resend-verification")
     user, token = resend_verification(db, str(data.email))
     if user and token:
         send_verification_email(user.email, token)

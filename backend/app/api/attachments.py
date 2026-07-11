@@ -1,19 +1,13 @@
-import os
-import uuid
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.auth_service import get_current_user
 from app.models.attachment import Attachment
+from app.services.storage_service import put_attachment, get_attachment, delete_attachment
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 security = HTTPBearer()
-UPLOAD_DIR = "/app/uploads"
-
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 ALLOWED_TYPES = {
     "image/jpeg", "image/png", "image/gif", "image/webp",
     "application/pdf",
@@ -43,23 +37,29 @@ async def upload(
     if len(content) > MAX_SIZE:
         raise HTTPException(status_code=400, detail="File too large (max 20 MB)")
 
-    ext = os.path.splitext(file.filename or "")[1]
-    stored_name = f"{uuid.uuid4()}{ext}"
-    path = os.path.join(UPLOAD_DIR, stored_name)
+    try:
+        key = put_attachment(content, file.filename or "attachment", file.content_type)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail="Unable to store attachment") from exc
 
-    with open(path, "wb") as f:
-        f.write(content)
-
-    attachment = Attachment(
-        user_id=user.id,
-        filename=file.filename or stored_name,
-        content_type=file.content_type,
-        file_path=path,
-        size=len(content),
-    )
-    db.add(attachment)
-    db.commit()
-    db.refresh(attachment)
+    try:
+        attachment = Attachment(
+            user_id=user.id,
+            filename=file.filename or "attachment",
+            content_type=file.content_type,
+            storage_key=key,
+            # Keep a non-null legacy field until it can be removed in a later
+            # backwards-incompatible schema cleanup.
+            file_path=key,
+            size=len(content),
+        )
+        db.add(attachment)
+        db.commit()
+        db.refresh(attachment)
+    except Exception:
+        db.rollback()
+        delete_attachment(key)
+        raise
 
     return {
         "id": str(attachment.id),
@@ -77,4 +77,12 @@ def download(attachment_id: str, user=Depends(_current_user), db: Session = Depe
     ).first()
     if not att:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    return FileResponse(att.file_path, filename=att.filename, media_type=att.content_type)
+    try:
+        content = get_attachment(att.storage_key or att.file_path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=404, detail="Attachment content is unavailable") from exc
+    return Response(
+        content=content,
+        media_type=att.content_type,
+        headers={"Content-Disposition": f'attachment; filename="{att.filename.replace(chr(34), "")}"'},
+    )

@@ -14,6 +14,9 @@ class Attachment(Base):
     message_id = Column(UUID(as_uuid=True), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
     filename = Column(String, nullable=False)
     content_type = Column(String, nullable=False)
+    storage_key = Column(String, nullable=False)
+    # Retained temporarily for migrations from local filesystem deployments.
+    # New code always resolves storage_key through storage_service.
     file_path = Column(String, nullable=False)
     size = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)

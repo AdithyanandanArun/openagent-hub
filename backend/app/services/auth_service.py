@@ -1,11 +1,11 @@
 import hashlib
-import os
 import secrets
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.attachment import Attachment
+from app.services.storage_service import delete_attachment
 from app.models.provider_config import ProviderConfig
 from app.schemas.auth import RegisterRequest
 from app.core.security import hash_password, verify_password, create_access_token, decode_token
@@ -97,14 +97,12 @@ def resend_verification(db: Session, email: str) -> tuple[User | None, str | Non
 def delete_account(db: Session, user: User, password: str) -> None:
     if not verify_password(password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password")
-    # Phase 1 still uses local attachment storage. Remove files before the DB
-    # cascade deletes their metadata; Phase 2 replaces this with object storage.
+    # Remove objects before the DB cascade deletes their metadata.
     attachments = db.query(Attachment).filter(Attachment.user_id == user.id).all()
     for attachment in attachments:
         try:
-            if attachment.file_path and os.path.isfile(attachment.file_path):
-                os.remove(attachment.file_path)
-        except OSError:
+            delete_attachment(attachment.storage_key or attachment.file_path)
+        except Exception:
             # The database deletion must still complete if a stale file cannot
             # be removed; the object-store lifecycle policy handles this later.
             pass

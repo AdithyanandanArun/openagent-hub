@@ -1,6 +1,5 @@
 import base64
 import json
-import os
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -23,6 +22,8 @@ from app.services.request_logger import RequestTimer, log_request
 from app.models.attachment import Attachment
 from app.schemas.conversation import ConversationCreate
 from app.schemas.chat import ChatRequest
+from app.services.storage_service import get_attachment
+from app.services.rate_limit_service import check_chat_request, acquire_chat_slot, release_chat_slot
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 security = HTTPBearer()
@@ -35,6 +36,7 @@ async def chat_stream(
     db: Session = Depends(get_db),
 ):
     user = get_current_user(db, credentials.credentials)
+    check_chat_request(user.id)
     provider = get_provider_config(db, user.id)
 
     # Two ways to chat: multi-provider routing (Phase 3+) or a single-provider config.
@@ -70,15 +72,14 @@ async def chat_stream(
                 attachment_refs.append(att)
                 if att.content_type.startswith("text/") or att.content_type == "application/json":
                     try:
-                        with open(att.file_path, "r", encoding="utf-8", errors="replace") as f:
-                            file_text = f.read(8000)
+                        file_text = get_attachment(att.storage_key or att.file_path).decode("utf-8", errors="replace")[:8000]
                         user_content = f"[Attachment: {att.filename}]\n```\n{file_text}\n```\n\n{user_content}"
                     except Exception:
                         pass
                 elif att.content_type == "application/pdf":
                     try:
                         import fitz  # PyMuPDF
-                        doc = fitz.open(att.file_path)
+                        doc = fitz.open(stream=get_attachment(att.storage_key or att.file_path), filetype="pdf")
                         pages_text = []
                         char_budget = 12000
                         for page in doc:
@@ -105,11 +106,10 @@ async def chat_stream(
     for att in attachment_refs:
         if att.content_type.startswith("image/"):
             try:
-                file_size = os.path.getsize(att.file_path)
-                if file_size > 10 * 1024 * 1024:
+                image_bytes = get_attachment(att.storage_key or att.file_path)
+                if len(image_bytes) > 10 * 1024 * 1024:
                     continue
-                with open(att.file_path, "rb") as img_f:
-                    b64 = base64.b64encode(img_f.read()).decode("utf-8")
+                b64 = base64.b64encode(image_bytes).decode("utf-8")
                 image_parts.append({
                     "type": "image_url",
                     "image_url": {"url": f"data:{att.content_type};base64,{b64}"},
@@ -279,6 +279,11 @@ async def chat_stream(
             # No restriction — all tools including always-on are available.
             effective_allowed = None
 
+    # Reserve the distributed slot only after all synchronous validation and
+    # attachment preparation have succeeded, so early 4xx responses cannot leak
+    # a user's concurrency quota.
+    acquire_chat_slot(user_id)
+
     async def generate():
         full_response = ""
         timer = RequestTimer()
@@ -315,6 +320,8 @@ async def chat_stream(
                             model=model, status_code=500, latency_ms=timer.elapsed_ms,
                             is_stream=True, error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            release_chat_slot(user_id)
 
     return StreamingResponse(
         generate(),
