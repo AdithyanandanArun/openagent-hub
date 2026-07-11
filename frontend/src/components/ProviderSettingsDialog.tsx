@@ -27,6 +27,7 @@ interface Props {
   username?: string;
   email?: string;
   onLogout?: () => void;
+  onDeleteAccount?: (password: string) => Promise<void>;
   onProvidersChange?: () => void;
 }
 
@@ -485,7 +486,22 @@ function ApiTab({
 
 // ── Account Tab ────────────────────────────────────────────────────────────────
 
-function AccountTab({ username, email, onLogout }: { username?: string; email?: string; onLogout?: () => void }) {
+function AccountTab({ username, email, onLogout, onDeleteAccount }: {
+  username?: string; email?: string; onLogout?: () => void; onDeleteAccount?: (password: string) => Promise<void>;
+}) {
+  const [password, setPassword] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
+  const remove = async () => {
+    if (!onDeleteAccount || !password || !confirm('Delete your account and all associated data? This cannot be undone.')) return;
+    setDeleting(true); setDeleteError('');
+    try { await onDeleteAccount(password); }
+    catch (err: unknown) {
+      setDeleteError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Unable to delete account.');
+    } finally { setDeleting(false); }
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3 p-4 bg-zinc-800 rounded-xl border border-zinc-700">
@@ -503,13 +519,25 @@ function AccountTab({ username, email, onLogout }: { username?: string; email?: 
           <LogOut size={15} /> Sign out
         </button>
       </div>
+      <div className="border-t border-red-900/60 pt-4 space-y-2">
+        <p className="text-sm font-medium text-red-300">Delete account</p>
+        <p className="text-xs text-zinc-500">This permanently removes your conversations, provider keys, attachments, and account data.</p>
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+          placeholder="Confirm with your password"
+          className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-red-700" />
+        {deleteError && <p className="text-xs text-red-400">{deleteError}</p>}
+        <button onClick={remove} disabled={!password || deleting}
+          className="w-full px-4 py-2.5 rounded-xl text-sm text-red-300 border border-red-900/70 hover:bg-red-950/40 disabled:opacity-50 transition-colors">
+          {deleting ? 'Deleting account…' : 'Delete account permanently'}
+        </button>
+      </div>
     </div>
   );
 }
 
 // ── Root dialog ────────────────────────────────────────────────────────────────
 
-export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose, username, email, onLogout, onProvidersChange }: Props) {
+export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose, username, email, onLogout, onDeleteAccount, onProvidersChange }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('providers');
 
   return (
@@ -551,7 +579,7 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
             {activeTab === 'skills' && <SkillsTab />}
             {activeTab === 'mcp' && <MCPTab />}
             {activeTab === 'api' && <ApiTab config={config} onSave={onSave} onFetchModels={onFetchModels} />}
-            {activeTab === 'account' && <AccountTab username={username} email={email} onLogout={onLogout} />}
+            {activeTab === 'account' && <AccountTab username={username} email={email} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />}
           </div>
         </div>
       </div>

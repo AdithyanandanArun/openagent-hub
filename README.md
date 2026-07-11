@@ -233,6 +233,30 @@ Rebuild frontend only:
 docker compose up -d --build frontend
 ```
 
+### Public deployment prerequisites
+
+Production starts fail closed. Supply these values from a secret manager rather
+than committing them to Git: a 32+ character `SECRET_KEY`, a base64-encoded
+32-byte `ENCRYPTION_KEY`, a TLS PostgreSQL `DATABASE_URL`, explicit HTTPS
+`ALLOWED_ORIGINS`, and `PUBLIC_APP_URL`.
+
+For the browser-only public beta, set:
+
+```bash
+ENVIRONMENT=production
+ENABLE_OPENAI_COMPAT_API=false
+ENABLE_CUSTOM_MCP_SERVERS=false
+ENABLE_WORKSPACE_OPEN=false
+EMAIL_DELIVERY_MODE=resend
+RESEND_API_KEY=...
+EMAIL_FROM=OpenAgent Hub <accounts@example.com>
+RUN_MIGRATIONS=false
+```
+
+Run Alembic separately as a one-shot deployment job. New accounts must verify
+their email before they can sign in; existing installations are marked verified
+by migration `014` to avoid locking out current users.
+
 ---
 
 ## License

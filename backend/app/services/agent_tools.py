@@ -22,6 +22,7 @@ from uuid import UUID
 from app.core.mcp_client import mcp_call_tool, MCPError, MCPSessionPool
 from app.models.mcp_server import MCPServer
 from app.services import memory_service
+from app.core.config import settings
 
 ToolHandler = Callable[["ToolContext", dict], Awaitable[str]]
 
@@ -326,6 +327,8 @@ def _mcp_tool_name(server_name: str, tool_name: str) -> str:
 
 def get_mcp_tools(db, user_id: UUID) -> dict[str, ToolDef]:
     """Build ToolDefs from the user's enabled MCP servers, using each server's cached tool list."""
+    if not settings.ENABLE_CUSTOM_MCP_SERVERS:
+        return {}
     servers = (
         db.query(MCPServer)
         .filter(MCPServer.user_id == user_id, MCPServer.enabled == True)

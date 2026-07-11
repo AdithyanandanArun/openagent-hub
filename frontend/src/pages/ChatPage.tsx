@@ -22,9 +22,10 @@ import { ProviderConfig } from '../services/chat';
 interface Props {
   user: User;
   onLogout: () => void;
+  onDeleteAccount: (password: string) => Promise<void>;
 }
 
-export function ChatPage({ user, onLogout }: Props) {
+export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
   const {
     conversations,
     currentConversation,
@@ -304,6 +305,7 @@ export function ChatPage({ user, onLogout }: Props) {
           username={user.username}
           email={user.email}
           onLogout={onLogout}
+          onDeleteAccount={onDeleteAccount}
           onProvidersChange={handleProvidersChange}
         />
       )}

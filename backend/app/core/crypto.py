@@ -1,9 +1,10 @@
 """
 AES-256-GCM encryption for secrets at rest (provider API keys).
 
-Ciphertext format: ``v1:<base64url(nonce(12) | ciphertext | tag(16))>``.
-The ``v1:`` prefix lets us detect already-encrypted values (so we never
-double-encrypt) and leaves room for future key rotation / algorithm changes.
+Ciphertext format: ``v2:<base64url(nonce(12) | ciphertext | tag(16))>``.
+The prefix lets us detect already-encrypted values (so we never double-encrypt)
+and supports a one-key grace period during manual key rotation. Legacy ``v1:``
+values remain readable.
 
 The key comes from ``settings.ENCRYPTION_KEY`` (32 raw bytes, base64-encoded).
 When unset, it is derived deterministically from ``SECRET_KEY`` via HKDF-SHA256
@@ -21,17 +22,22 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from app.core.config import settings
 
-_PREFIX = "v1:"
+_PREFIX = "v2:"
+_LEGACY_PREFIXES = ("v1:", _PREFIX)
 _NONCE_LEN = 12
+
+
+def _decode_key(encoded: str) -> bytes:
+    raw = base64.b64decode(encoded)
+    if len(raw) != 32:
+        raise ValueError("Encryption keys must decode to exactly 32 bytes.")
+    return raw
 
 
 def _load_key() -> bytes:
     """Return the 32-byte AES key."""
     if settings.ENCRYPTION_KEY:
-        raw = base64.b64decode(settings.ENCRYPTION_KEY)
-        if len(raw) != 32:
-            raise ValueError("ENCRYPTION_KEY must decode to exactly 32 bytes.")
-        return raw
+        return _decode_key(settings.ENCRYPTION_KEY)
     # Derive from SECRET_KEY so deploys without an explicit key still encrypt.
     return HKDF(
         algorithm=hashes.SHA256(),
@@ -43,10 +49,11 @@ def _load_key() -> bytes:
 
 _KEY = _load_key()
 _AESGCM = AESGCM(_KEY)
+_PREVIOUS_AESGCM = AESGCM(_decode_key(settings.PREVIOUS_ENCRYPTION_KEY)) if settings.PREVIOUS_ENCRYPTION_KEY else None
 
 
 def is_encrypted(value: str | None) -> bool:
-    return bool(value) and value.startswith(_PREFIX)
+    return bool(value) and value.startswith(_LEGACY_PREFIXES)
 
 
 def encrypt(plaintext: str | None) -> str:
@@ -72,9 +79,15 @@ def decrypt(token: str | None) -> str:
         return ""
     if not is_encrypted(token):
         return token  # legacy plaintext or empty
-    blob = base64.urlsafe_b64decode(token[len(_PREFIX):].encode("ascii"))
+    prefix = next(prefix for prefix in _LEGACY_PREFIXES if token.startswith(prefix))
+    blob = base64.urlsafe_b64decode(token[len(prefix):].encode("ascii"))
     nonce, ct = blob[:_NONCE_LEN], blob[_NONCE_LEN:]
-    return _AESGCM.decrypt(nonce, ct, None).decode("utf-8")
+    try:
+        return _AESGCM.decrypt(nonce, ct, None).decode("utf-8")
+    except Exception:
+        if _PREVIOUS_AESGCM is None:
+            raise
+        return _PREVIOUS_AESGCM.decrypt(nonce, ct, None).decode("utf-8")
 
 
 def mask(secret: str | None) -> str:

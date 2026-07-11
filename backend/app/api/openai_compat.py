@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -19,8 +19,17 @@ from app.models.user import User
 from app.services import openai_proxy
 from app.services import responses_shim
 from app.services.request_logger import log_request, RequestTimer
+from app.core.config import settings
 
-router = APIRouter(prefix="/v1", tags=["openai-compat"])
+
+def _require_openai_compat_enabled() -> None:
+    # Keep the route shape for self-hosted deployments, but make browser-only
+    # public deployments indistinguishable from a missing endpoint.
+    if not settings.ENABLE_OPENAI_COMPAT_API:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+router = APIRouter(prefix="/v1", tags=["openai-compat"], dependencies=[Depends(_require_openai_compat_enabled)])
 
 
 def _error(message: str, status: int, code: str, type_: str = "invalid_request_error"):

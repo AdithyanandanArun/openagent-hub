@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bot } from 'lucide-react';
 import clsx from 'clsx';
+import { resendVerification, verifyEmail } from '../services/auth';
 
 interface Props {
   onLogin: (email: string, password: string) => Promise<void>;
-  onRegister: (email: string, username: string, password: string) => Promise<void>;
+  onRegister: (email: string, username: string, password: string) => Promise<string>;
 }
 
 export function LoginPage({ onLogin, onRegister }: Props) {
@@ -13,7 +14,23 @@ export function LoginPage({ onLogin, onRegister }: Props) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get('verify_token');
+    if (!token) return;
+    setLoading(true);
+    verifyEmail(token)
+      .then((message) => { setNotice(message); setMode('login'); })
+      .catch((err: unknown) => {
+        setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Unable to verify this email link.');
+      })
+      .finally(() => {
+        window.history.replaceState({}, '', window.location.pathname);
+        setLoading(false);
+      });
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +40,9 @@ export function LoginPage({ onLogin, onRegister }: Props) {
       if (mode === 'login') {
         await onLogin(email, password);
       } else {
-        await onRegister(email, username, password);
+        setNotice(await onRegister(email, username, password));
+        setMode('login');
+        setPassword('');
       }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } }; message?: string })
@@ -94,6 +113,7 @@ export function LoginPage({ onLogin, onRegister }: Props) {
           />
 
           {error && <p className="text-red-400 text-sm">{error}</p>}
+          {notice && <p className="text-emerald-400 text-sm">{notice}</p>}
 
           <button
             type="submit"
@@ -103,6 +123,21 @@ export function LoginPage({ onLogin, onRegister }: Props) {
             {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
           </button>
         </form>
+        {mode === 'login' && (
+          <button
+            type="button"
+            onClick={async () => {
+              if (!email) { setError('Enter your email address first.'); return; }
+              setLoading(true); setError('');
+              try { setNotice(await resendVerification(email)); } catch { setError('Unable to resend verification email.'); }
+              finally { setLoading(false); }
+            }}
+            disabled={loading}
+            className="w-full mt-3 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+          >
+            Resend verification email
+          </button>
+        )}
       </div>
     </div>
   );

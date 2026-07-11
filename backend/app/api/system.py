@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from fastapi import HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import func, desc, case
 from sqlalchemy.orm import Session
@@ -19,6 +20,7 @@ from app.models.provider import Provider
 from app.models.model_catalog import ModelCatalog
 from app.models.request_log import RequestLog
 from app.services.auth_service import get_current_user
+from app.core.config import settings
 
 router = APIRouter(prefix="/system", tags=["system"])
 security = HTTPBearer()
@@ -133,6 +135,8 @@ def failover_log(
 
 @router.post("/open-workspace")
 def open_workspace(user=Depends(_current_user)):
+    if not settings.ENABLE_WORKSPACE_OPEN:
+        raise HTTPException(status_code=404, detail="Not found")
     workspace = os.environ.get("WORKSPACE_DIR", os.getcwd())
     system = platform.system()
     try:

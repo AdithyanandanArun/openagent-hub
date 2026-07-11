@@ -3,7 +3,7 @@ import { LoginPage } from './pages/LoginPage';
 import { ChatPage } from './pages/ChatPage';
 
 export default function App() {
-  const { user, isLoading, login, register, logout } = useAuth();
+  const { user, isLoading, login, register, logout, deleteAccount } = useAuth();
 
   if (isLoading) {
     return (
@@ -17,5 +17,5 @@ export default function App() {
     return <LoginPage onLogin={login} onRegister={register} />;
   }
 
-  return <ChatPage user={user} onLogout={logout} />;
+  return <ChatPage user={user} onLogout={logout} onDeleteAccount={deleteAccount} />;
 }

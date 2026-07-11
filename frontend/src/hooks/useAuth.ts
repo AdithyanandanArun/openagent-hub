@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { login as apiLogin, register as apiRegister, getMe, User } from '../services/auth';
+import { login as apiLogin, register as apiRegister, getMe, deleteAccount as apiDeleteAccount, User } from '../services/auth';
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -22,10 +22,7 @@ export function useAuth() {
   }, []);
 
   const register = useCallback(async (email: string, username: string, password: string) => {
-    const token = await apiRegister(email, username, password);
-    localStorage.setItem('token', token);
-    const me = await getMe();
-    setUser(me);
+    return apiRegister(email, username, password);
   }, []);
 
   const logout = useCallback(() => {
@@ -33,5 +30,11 @@ export function useAuth() {
     setUser(null);
   }, []);
 
-  return { user, isLoading, login, register, logout };
+  const deleteAccount = useCallback(async (password: string) => {
+    await apiDeleteAccount(password);
+    localStorage.removeItem('token');
+    setUser(null);
+  }, []);
+
+  return { user, isLoading, login, register, logout, deleteAccount };
 }

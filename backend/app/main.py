@@ -9,6 +9,7 @@ from app.api import (
     system,
 )
 from app.services.health_probe import run_health_probes
+from app.core.config import settings
 
 
 def _patch_playwright_servers():
@@ -33,6 +34,7 @@ def _patch_playwright_servers():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.validate_runtime()
     _patch_playwright_servers()
     task = asyncio.create_task(run_health_probes())
     yield
@@ -43,7 +45,7 @@ app = FastAPI(title="OpenAgent Hub", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
