@@ -4,49 +4,50 @@ metadata:
   name: openagent-beta-provider-health
 spec:
   template:
-    template:
-      spec:
-        maxRetries: 2
-        timeoutSeconds: 900
-        serviceAccountName: $BETA_RUNTIME_SERVICE_ACCOUNT
-        containers:
-          - image: $BACKEND_IMAGE
-            command: ["python", "-m", "app.health_probe_runner"]
-            resources:
-              limits:
-                cpu: "1"
-                memory: 1Gi
-            env:
-              - name: ENVIRONMENT
-                value: production
-              - name: ALLOWED_ORIGINS
-                value: $BETA_PUBLIC_APP_URL
-              - name: PUBLIC_APP_URL
-                value: $BETA_PUBLIC_APP_URL
-              - name: ENABLE_OPENAI_COMPAT_API
-                value: "false"
-              - name: ENABLE_CUSTOM_MCP_SERVERS
-                value: "false"
-              - name: ENABLE_WORKSPACE_OPEN
-                value: "false"
-              - name: STORAGE_BACKEND
-                value: gcs
-              - name: GCS_BUCKET
-                value: $BETA_GCS_BUCKET
-              - name: GOOGLE_CLOUD_PROJECT
-                value: $BETA_GCP_PROJECT_ID
-              - name: REDIS_URL
-                valueFrom:
-                  secretKeyRef: { name: $BETA_REDIS_URL_SECRET, key: latest }
-              - name: DATABASE_URL
-                valueFrom:
-                  secretKeyRef: { name: $BETA_DATABASE_URL_SECRET, key: latest }
-              - name: SECRET_KEY
-                valueFrom:
-                  secretKeyRef: { name: $BETA_SECRET_KEY_SECRET, key: latest }
-              - name: ENCRYPTION_KEY
-                valueFrom:
-                  secretKeyRef: { name: $BETA_ENCRYPTION_KEY_SECRET, key: latest }
-              - name: RESEND_API_KEY
-                valueFrom:
-                  secretKeyRef: { name: $BETA_RESEND_API_KEY_SECRET, key: latest }
+    spec:
+      template:
+        spec:
+          maxRetries: 2
+          timeoutSeconds: 900
+          serviceAccountName: $BETA_RUNTIME_SERVICE_ACCOUNT
+          containers:
+            - image: $BACKEND_IMAGE
+              command: ["python", "-m", "app.health_probe_runner"]
+              resources:
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+              env:
+                - name: ENVIRONMENT
+                  value: production
+                - name: ALLOWED_ORIGINS
+                  value: $BETA_PUBLIC_APP_URL
+                - name: PUBLIC_APP_URL
+                  value: $BETA_PUBLIC_APP_URL
+                - name: ENABLE_OPENAI_COMPAT_API
+                  value: "false"
+                - name: ENABLE_CUSTOM_MCP_SERVERS
+                  value: "false"
+                - name: ENABLE_WORKSPACE_OPEN
+                  value: "false"
+                - name: STORAGE_BACKEND
+                  value: gcs
+                - name: GCS_BUCKET
+                  value: $BETA_GCS_BUCKET
+                - name: GOOGLE_CLOUD_PROJECT
+                  value: $BETA_GCP_PROJECT_ID
+                - name: REDIS_URL
+                  valueFrom:
+                    secretKeyRef: { name: $BETA_REDIS_URL_SECRET, key: latest }
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: { name: $BETA_DATABASE_URL_SECRET, key: latest }
+                - name: SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: $BETA_SECRET_KEY_SECRET, key: latest }
+                - name: ENCRYPTION_KEY
+                  valueFrom:
+                    secretKeyRef: { name: $BETA_ENCRYPTION_KEY_SECRET, key: latest }
+                - name: RESEND_API_KEY
+                  valueFrom:
+                    secretKeyRef: { name: $BETA_RESEND_API_KEY_SECRET, key: latest }
