@@ -385,24 +385,22 @@ later scale-up without a database or attachment migration.
    terraform apply
    ```
 
-2. Add versions to the six Secret Manager secret IDs from
+2. Add versions to the four Secret Manager secret IDs from
    `terraform output secret_ids`: `DATABASE_URL` (Supabase with
    `sslmode=require`), `SECRET_KEY`, base64 32-byte `ENCRYPTION_KEY`,
-   `RESEND_API_KEY`, `REDIS_URL`, and `INVITED_EMAILS`. `INVITED_EMAILS` is a
-   comma-separated list of the beta testers' email addresses. For Redis, create an Upstash Free database
-   and store its TLS connection URL (`rediss://...`) as the entire `REDIS_URL`
-   secret. Do not put any of these values in Terraform, GitHub variables, or
-   this repository.
+   and `REDIS_URL`. For Redis, create an Upstash Free database and store its
+   TLS connection URL (`rediss://...`) as the entire `REDIS_URL` secret. The
+   beta uses open registration and does not require the Resend email
+   verification path or an invited-user list. Do not put any of these values in
+   Terraform, GitHub variables, or this repository.
 
 3. Create a `beta` GitHub Environment and add these variables from Terraform:
    `BETA_GCP_PROJECT_ID`, `BETA_GCP_REGION`, `BETA_ARTIFACT_REPOSITORY`,
    `BETA_RUNTIME_SERVICE_ACCOUNT`, `BETA_GCS_BUCKET`,
    `BETA_WORKLOAD_IDENTITY_PROVIDER`, and `BETA_DEPLOYER_SERVICE_ACCOUNT`.
-   Also add `BETA_PUBLIC_APP_URL` (an HTTPS beta domain), `BETA_EMAIL_FROM`,
-   and the six Secret Manager IDs as `BETA_DATABASE_URL_SECRET`,
-   `BETA_SECRET_KEY_SECRET`, `BETA_ENCRYPTION_KEY_SECRET`,
-   `BETA_RESEND_API_KEY_SECRET`, `BETA_REDIS_URL_SECRET`, and
-   `BETA_INVITED_EMAILS_SECRET`.
+   Also add `BETA_PUBLIC_APP_URL` (an HTTPS beta domain) and the four Secret
+   Manager IDs as `BETA_DATABASE_URL_SECRET`, `BETA_SECRET_KEY_SECRET`,
+   `BETA_ENCRYPTION_KEY_SECRET`, and `BETA_REDIS_URL_SECRET`.
 
 4. Point the beta hostname at Cloud Run using your DNS provider's Cloud Run
    custom-domain instructions, then run the **Deploy beta** workflow or push a
@@ -411,12 +409,12 @@ later scale-up without a database or attachment migration.
    health job runs every six hours after this workflow is on the repository's
    default branch; it can always be run manually from Actions.
 
-The beta service is deliberately limited to 0–3 instances and 10 concurrent
+   The beta service is deliberately limited to 0–3 instances and 10 concurrent
 requests per instance. It remains browser-only: public `/v1`, custom MCP
 servers, and host workspace access stay disabled. Set a Google Cloud budget
-alert before deploying, use invited accounts only, and review the Upstash and
-GCS quotas regularly. When the beta needs no-cold-start operation, HA Redis,
-or more than a modest user base, promote the same application to the GKE chart.
+alert before deploying and review the Upstash and GCS quotas regularly. When
+the beta needs no-cold-start operation, HA Redis, or more than a modest user
+base, promote the same application to the GKE chart.
 
 ---
 

@@ -81,13 +81,9 @@ spec:
             - name: ENABLE_HEALTH_PROBES
               value: "false"
             - name: EMAIL_VERIFICATION_REQUIRED
-              value: "true"
-            - name: EMAIL_DELIVERY_MODE
-              value: resend
-            - name: EMAIL_FROM
-              value: $BETA_EMAIL_FROM
+              value: "false"
             - name: INVITE_ONLY
-              value: "true"
+              value: "false"
             - name: RUN_MIGRATIONS
               value: "false"
             - name: DATABASE_URL
@@ -99,12 +95,6 @@ spec:
             - name: ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef: { name: $BETA_ENCRYPTION_KEY_SECRET, key: latest }
-            - name: RESEND_API_KEY
-              valueFrom:
-                secretKeyRef: { name: $BETA_RESEND_API_KEY_SECRET, key: latest }
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef: { name: $BETA_REDIS_URL_SECRET, key: latest }
-            - name: INVITED_EMAILS
-              valueFrom:
-                secretKeyRef: { name: $BETA_INVITED_EMAILS_SECRET, key: latest }
