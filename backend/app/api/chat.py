@@ -162,6 +162,17 @@ async def chat_stream(
     if memory_context:
         system_prompt = f"{system_prompt}\n\n{memory_context}"
 
+    # Private knowledge retrieval is best-effort: normal chat remains available
+    # when the user has not configured embeddings or has no indexed sources.
+    try:
+        from app.services.knowledge_service import search_knowledge
+        knowledge = await search_knowledge(db, user.id, request.message, project_id=conv.project_id, conversation_id=conv.id, limit=5)
+        if knowledge:
+            context = "\n\n".join(f"[Source: {item['source_name']}]\n{item['content']}" for item in knowledge)
+            system_prompt = f"{system_prompt}\n\n## Private knowledge\nUse this context when relevant. Cite supporting claims as `[Source: filename]`; do not invent citations.\n\n{context}"
+    except Exception:
+        pass
+
     # Optional skill: prepend its instructions and capture any tool restriction.
     allowed_tool_names = None
     if request.skill_id:
