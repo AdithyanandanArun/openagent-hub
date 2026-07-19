@@ -10,6 +10,10 @@ from app.models.attachment import Attachment
 from app.models.knowledge_source import KnowledgeSource
 from app.services.storage_service import get_attachment
 from app.core.config import settings
+from app.models.knowledge_chunk import KnowledgeChunk
+from app.models.knowledge_source import KnowledgeSource
+from app.models.user_preference import UserPreference
+from app.services.openai_proxy import embeddings
 
 
 def create_attachment_source(db: Session, user_id: UUID, attachment_id: UUID, project_id: UUID | None = None, conversation_id: UUID | None = None) -> KnowledgeSource:
@@ -70,3 +74,16 @@ async def start_indexing_job(source_id: UUID) -> None:
         response = await client.post(endpoint, headers={"Authorization": f"Bearer {credentials.token}"}, json=payload)
     if response.status_code >= 300:
         raise RuntimeError(f"Could not start knowledge worker: HTTP {response.status_code}")
+
+
+async def search_knowledge(db: Session, user_id: UUID, query: str, project_id: UUID | None = None, conversation_id: UUID | None = None, limit: int = 6) -> list[dict]:
+    preference = db.get(UserPreference, user_id)
+    if not preference or not preference.embedding_provider_id or not preference.embedding_model:
+        raise HTTPException(status_code=400, detail="Choose an embedding provider and model in Settings → Knowledge")
+    response = await embeddings(db, user_id, {"model": preference.embedding_model, "input": query}, preferred_provider_id=str(preference.embedding_provider_id))
+    vector = (response.get("data") or [{}])[0].get("embedding")
+    if not isinstance(vector, list): raise HTTPException(status_code=502, detail="Embedding provider returned an invalid vector")
+    query_rows = db.query(KnowledgeChunk, KnowledgeSource, KnowledgeChunk.embedding.cosine_distance(vector).label("distance")).join(KnowledgeSource, KnowledgeChunk.source_id == KnowledgeSource.id).filter(KnowledgeChunk.user_id == user_id, KnowledgeSource.status == "ready")
+    if project_id: query_rows = query_rows.filter(KnowledgeSource.project_id == project_id)
+    if conversation_id: query_rows = query_rows.filter(KnowledgeSource.conversation_id == conversation_id)
+    return [{"source_id": str(source.id), "source_name": source.name, "content": chunk.content, "score": round(1 - float(distance), 4)} for chunk, source, distance in query_rows.order_by("distance").limit(limit).all()]
