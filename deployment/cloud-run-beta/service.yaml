@@ -75,6 +75,8 @@ spec:
               value: $BETA_GCS_BUCKET
             - name: GOOGLE_CLOUD_PROJECT
               value: $BETA_GCP_PROJECT_ID
+            - name: GOOGLE_CLOUD_REGION
+              value: $BETA_GCP_REGION
             - name: AUTH_REQUESTS_PER_HOUR
               value: "20"
             - name: CHAT_REQUESTS_PER_MINUTE

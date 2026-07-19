@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from uuid import UUID
+import asyncio
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.attachment import Attachment
 from app.models.knowledge_source import KnowledgeSource
 from app.services.storage_service import get_attachment
+from app.core.config import settings
 
 
 def create_attachment_source(db: Session, user_id: UUID, attachment_id: UUID, project_id: UUID | None = None, conversation_id: UUID | None = None) -> KnowledgeSource:
@@ -49,3 +51,22 @@ def chunk_text(text: str, size: int = 1400, overlap: int = 200) -> list[str]:
         if chunk: chunks.append(chunk)
         start = max(end - overlap, start + 1)
     return chunks
+
+
+async def start_indexing_job(source_id: UUID) -> None:
+    """Ask Cloud Run to execute the zero-idle worker with one source id."""
+    if not settings.is_production:
+        return
+    if not settings.GOOGLE_CLOUD_PROJECT:
+        raise RuntimeError("GOOGLE_CLOUD_PROJECT is required for knowledge indexing")
+    import google.auth
+    from google.auth.transport.requests import Request
+    import httpx
+    credentials, _ = await asyncio.to_thread(google.auth.default, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    await asyncio.to_thread(credentials.refresh, Request())
+    endpoint = f"https://run.googleapis.com/v2/projects/{settings.GOOGLE_CLOUD_PROJECT}/locations/{settings.GOOGLE_CLOUD_REGION}/jobs/{settings.KNOWLEDGE_WORKER_JOB}:run"
+    payload = {"overrides": {"containerOverrides": [{"env": [{"name": "KNOWLEDGE_SOURCE_ID", "value": str(source_id)}]}]}}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.post(endpoint, headers={"Authorization": f"Bearer {credentials.token}"}, json=payload)
+    if response.status_code >= 300:
+        raise RuntimeError(f"Could not start knowledge worker: HTTP {response.status_code}")

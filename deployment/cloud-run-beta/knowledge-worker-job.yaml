@@ -26,6 +26,8 @@ spec:
                   value: $BETA_GCS_BUCKET
                 - name: GOOGLE_CLOUD_PROJECT
                   value: $BETA_GCP_PROJECT_ID
+                - name: GOOGLE_CLOUD_REGION
+                  value: $BETA_GCP_REGION
                 - name: DATABASE_URL
                   valueFrom:
                     secretKeyRef: { name: $BETA_DATABASE_URL_SECRET, key: latest }

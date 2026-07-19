@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     STORAGE_BACKEND: str = "local"  # local | gcs
     GCS_BUCKET: Optional[str] = None
     GOOGLE_CLOUD_PROJECT: Optional[str] = None
+    GOOGLE_CLOUD_REGION: str = "us-central1"
+    KNOWLEDGE_WORKER_JOB: str = "openagent-beta-knowledge-worker"
     REDIS_URL: Optional[str] = None
     AUTH_REQUESTS_PER_HOUR: int = 20
     CHAT_REQUESTS_PER_MINUTE: int = 20

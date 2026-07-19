@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.knowledge_source import KnowledgeSource
 from app.services.auth_service import get_current_user
-from app.services.knowledge_service import create_attachment_source
+from app.services.knowledge_service import create_attachment_source, start_indexing_job
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 security = HTTPBearer()
@@ -38,8 +38,14 @@ def list_sources(project_id: Optional[UUID] = None, conversation_id: Optional[UU
 
 
 @router.post("/attachments", status_code=201)
-def add_attachment_source(data: AttachmentSourceCreate, user=Depends(_current_user), db: Session = Depends(get_db)):
-    return _serialize(create_attachment_source(db, user.id, data.attachment_id, data.project_id, data.conversation_id))
+async def add_attachment_source(data: AttachmentSourceCreate, user=Depends(_current_user), db: Session = Depends(get_db)):
+    source = create_attachment_source(db, user.id, data.attachment_id, data.project_id, data.conversation_id)
+    try:
+        await start_indexing_job(source.id)
+    except Exception as exc:
+        source.status, source.error = "failed", str(exc)[:500]
+        db.commit()
+    return _serialize(source)
 
 
 @router.delete("/{source_id}", status_code=204)
