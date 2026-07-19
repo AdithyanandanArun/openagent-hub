@@ -16,6 +16,14 @@ export interface ProviderModel {
   model: string;
 }
 
+// Discovery also retains embeddings for automatic knowledge routing. Keep
+// those endpoint-only models out of chat and agent model selectors.
+const isEmbeddingModel = (model: string) => {
+  const normalized = model.toLowerCase();
+  return (normalized.includes('embedding') || normalized.includes('embed'))
+    && !['image', 'audio', 'video', 'speech', 'rerank'].some((kind) => normalized.includes(kind));
+};
+
 export function useProviders() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [providerModels, setProviderModels] = useState<ProviderModel[]>([]);
@@ -44,7 +52,7 @@ export function useProviders() {
       const results = await Promise.allSettled(
         batch.map(async (p) => {
           const models = await fetchProviderModels(p.id);
-          return models.map((m): ProviderModel => ({
+          return models.filter((m) => !isEmbeddingModel(m)).map((m): ProviderModel => ({
             provider_id: p.id,
             provider_name: p.name,
             model: m,
@@ -91,7 +99,7 @@ export function useProviders() {
       )
     );
     if (result.status === 'healthy') {
-      const newModels = result.models.map((m): ProviderModel => {
+      const newModels = result.models.filter((m) => !isEmbeddingModel(m)).map((m): ProviderModel => {
         const p = providers.find((x) => x.id === id)!;
         return { provider_id: id, provider_name: p?.name ?? '', model: m };
       });

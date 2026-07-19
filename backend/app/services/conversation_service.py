@@ -72,11 +72,74 @@ def truncate_messages(db: Session, conversation_id: UUID, from_message_id: UUID)
     db.commit()
 
 
-def auto_title_conversation(db: Session, conversation_id: UUID, first_message: str) -> None:
+def _fallback_title(first_message: str) -> str:
+    title = " ".join(first_message.split())[:60].strip()
+    if len(first_message.strip()) > 60:
+        title += "..."
+    return title or "New Conversation"
+
+
+async def generate_conversation_title(
+    db: Session,
+    conversation_id: UUID,
+    user_id: UUID,
+    first_message: str,
+    assistant_response: str,
+    model: str,
+    *,
+    use_router: bool,
+    base_url: str,
+    api_key: str,
+    preferred_provider_id: str | None = None,
+    model_order: list[tuple[str, str]] | None = None,
+) -> str:
+    """Generate a concise title after the first complete assistant response.
+
+    Uses the same successful chat-model route and failover chain rather than a
+    shared key. If a provider is unavailable, the first user-message fallback
+    preserves a usable title without delaying the completed conversation.
+    """
     conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
-    if conv and conv.title == "New Conversation":
-        title = first_message[:60].strip()
-        if len(first_message) > 60:
-            title += "..."
-        conv.title = title
-        db.commit()
+    if not conv or conv.user_id != user_id or conv.title != "New Conversation":
+        return conv.title if conv else "New Conversation"
+
+    prompt = [
+        {
+            "role": "system",
+            "content": (
+                "Create a short, specific title for this conversation. Return only the title, "
+                "with no quotes, no markdown, and no ending punctuation. Keep it under 60 characters."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"User request:\n{first_message[:1200]}\n\nAssistant response:\n{assistant_response[:1600]}",
+        },
+    ]
+    title = ""
+    try:
+        if use_router:
+            from app.services.router_service import route_completion
+            message, _provider = await route_completion(
+                db, user_id, model, prompt,
+                preferred_provider_id=preferred_provider_id,
+                temperature=0.2,
+                model_order=model_order,
+            )
+        else:
+            from app.core.provider import chat_completion
+            message = await chat_completion(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                messages=prompt,
+                temperature=0.2,
+            )
+        title = " ".join(str(message.get("content") or "").replace("\n", " ").split())
+        title = title.strip(" `#.:;\\\"'")[:60].strip()
+    except Exception:
+        title = ""
+
+    conv.title = title or _fallback_title(first_message)
+    db.commit()
+    return conv.title

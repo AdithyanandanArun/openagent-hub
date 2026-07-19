@@ -97,6 +97,7 @@ export function streamChat(
     onToolCall?: (tool: string, input: any) => void;
     onToolResult?: (tool: string, output: string) => void;
     onRoute?: (info: { model: string; provider?: string | null; reason?: string }) => void;
+    onTitle?: (info: { conversation_id: string; title: string }) => void;
   },
 ): AbortController {
   const controller = new AbortController();
@@ -150,6 +151,7 @@ export function streamChat(
             else if (evt.type === 'tool_call') options?.onToolCall?.(evt.tool, evt.input);
             else if (evt.type === 'tool_result') options?.onToolResult?.(evt.tool, evt.output);
             else if (evt.type === 'route') options?.onRoute?.({ model: evt.model, provider: evt.provider, reason: evt.reason });
+            else if (evt.type === 'title') options?.onTitle?.({ conversation_id: evt.conversation_id, title: evt.title });
             else if (evt.type === 'done') onDone();
             else if (evt.type === 'error') onError(evt.message);
           } catch {

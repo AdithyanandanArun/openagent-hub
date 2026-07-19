@@ -79,14 +79,55 @@ async def start_indexing_job(source_id: UUID) -> None:
 
 async def search_knowledge(db: Session, user_id: UUID, query: str, project_id: UUID | None = None, conversation_id: UUID | None = None, limit: int = 6) -> list[dict]:
     preference = db.get(UserPreference, user_id)
-    if not preference or not preference.embedding_provider_id or not preference.embedding_model:
-        raise HTTPException(status_code=400, detail="Choose an embedding provider and model in Settings → Knowledge")
-    response = await embeddings(db, user_id, {"model": preference.embedding_model, "input": query}, preferred_provider_id=str(preference.embedding_provider_id))
-    vector = (response.get("data") or [{}])[0].get("embedding")
-    if not isinstance(vector, list): raise HTTPException(status_code=502, detail="Embedding provider returned an invalid vector")
-    query_rows = db.query(KnowledgeChunk, KnowledgeSource, KnowledgeChunk.embedding.cosine_distance(vector).label("distance")).join(KnowledgeSource, KnowledgeChunk.source_id == KnowledgeSource.id).filter(KnowledgeChunk.user_id == user_id, KnowledgeSource.status == "ready")
+    if not preference or not preference.embedding_provider_id:
+        raise HTTPException(status_code=400, detail="Choose an embedding provider in Settings → Knowledge")
     scope = [and_(KnowledgeSource.project_id.is_(None), KnowledgeSource.conversation_id.is_(None))]
     if project_id: scope.append(KnowledgeSource.project_id == project_id)
     if conversation_id: scope.append(KnowledgeSource.conversation_id == conversation_id)
-    query_rows = query_rows.filter(or_(*scope))
-    return [{"source_id": str(source.id), "source_name": source.name, "content": chunk.content, "score": round(1 - float(distance), 4)} for chunk, source, distance in query_rows.order_by("distance").limit(limit).all()]
+    sources = (
+        db.query(KnowledgeSource)
+        .filter(KnowledgeSource.user_id == user_id, KnowledgeSource.status == "ready", or_(*scope))
+        .all()
+    )
+
+    # A provider can fall back to a model with a different vector dimension.
+    # Keep sources in their original embedding space and make one query vector
+    # per space, instead of comparing incompatible pgvector dimensions.
+    spaces: dict[tuple[str, str | None], list[UUID]] = {}
+    for source in sources:
+        model = source.embedding_model or preference.embedding_model or "auto"
+        provider_id = str(source.embedding_provider_id) if source.embedding_provider_id else str(preference.embedding_provider_id)
+        spaces.setdefault((model, provider_id), []).append(source.id)
+
+    matches: list[dict] = []
+    for (model, provider_id), source_ids in spaces.items():
+        try:
+            response = await embeddings(
+                db, user_id, {"model": model, "input": query}, preferred_provider_id=provider_id,
+            )
+            vector = (response.get("data") or [{}])[0].get("embedding")
+            if not isinstance(vector, list):
+                continue
+            rows = (
+                db.query(KnowledgeChunk, KnowledgeSource, KnowledgeChunk.embedding.cosine_distance(vector).label("distance"))
+                .join(KnowledgeSource, KnowledgeChunk.source_id == KnowledgeSource.id)
+                .filter(KnowledgeChunk.source_id.in_(source_ids))
+                .order_by("distance")
+                .limit(limit)
+                .all()
+            )
+            matches.extend(
+                {
+                    "source_id": str(source.id),
+                    "source_name": source.name,
+                    "content": chunk.content,
+                    "score": round(1 - float(distance), 4),
+                }
+                for chunk, source, distance in rows
+            )
+        except Exception:
+            # A failing old embedding provider should not make unrelated
+            # knowledge sources unavailable.
+            continue
+
+    return sorted(matches, key=lambda item: item["score"], reverse=True)[:limit]

@@ -22,5 +22,10 @@ class KnowledgeSource(Base):
     status = Column(String, nullable=False, default="queued")  # queued | indexing | ready | failed | cancelled
     error = Column(String, nullable=True)
     chunk_count = Column(Integer, nullable=False, default=0)
+    # Store the embedding space used for this source. Automatic routing can
+    # legitimately pick different models over time; pgvector comparisons must
+    # always use a query vector produced by the same embedding model.
+    embedding_provider_id = Column(UUID(as_uuid=True), ForeignKey("providers.id", ondelete="SET NULL"), nullable=True)
+    embedding_model = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

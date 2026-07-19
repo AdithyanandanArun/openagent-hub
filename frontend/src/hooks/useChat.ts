@@ -139,6 +139,10 @@ export function useChat() {
           skillAuto: opts?.skillAuto,
           routingMode: opts?.routingMode,
           onRoute: (info) => setRouteInfo(info),
+          onTitle: ({ conversation_id, title }) => {
+            setConversations((previous) => previous.map((conversation) => conversation.id === conversation_id ? { ...conversation, title } : conversation));
+            setCurrentConversation((previous) => previous?.id === conversation_id ? { ...previous, title } : previous);
+          },
           onToolCall: (tool, input) => setStreamingTools((p) => [...p, { tool, input }]),
           onToolResult: (tool, output) =>
             setStreamingTools((p) => {

@@ -14,7 +14,7 @@ from app.services.conversation_service import (
     create_conversation,
     get_conversation,
     add_message,
-    auto_title_conversation,
+    generate_conversation_title,
 )
 from app.services.llm_service import get_provider_config
 from app.services.memory_service import build_memory_context
@@ -124,8 +124,6 @@ async def chat_stream(
         att.message_id = user_msg.id
     if attachment_refs:
         db.commit()
-
-    auto_title_conversation(db, conv.id, request.message)
 
     db.refresh(conv)
 
@@ -321,9 +319,23 @@ async def chat_stream(
 
             with SessionLocal() as fresh_db:
                 add_message(fresh_db, conv_id, "assistant", full_response)
+                generated_title = await generate_conversation_title(
+                    fresh_db,
+                    conv_id,
+                    user_id,
+                    request.message,
+                    full_response,
+                    model,
+                    use_router=use_router,
+                    base_url=base_url,
+                    api_key=api_key,
+                    preferred_provider_id=preferred_provider_id,
+                    model_order=model_order,
+                )
                 log_request(fresh_db, user_id=user_id, endpoint="/api/chat/stream",
                             model=model, status_code=200, latency_ms=timer.elapsed_ms, is_stream=True)
 
+            yield f"data: {json.dumps({'type': 'title', 'conversation_id': str(conv_id), 'title': generated_title})}\n\n"
             yield f"data: {json.dumps({'type': 'done', 'conversation_id': str(conv_id)})}\n\n"
         except Exception as e:
             with SessionLocal() as err_db:

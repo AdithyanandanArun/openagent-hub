@@ -27,7 +27,7 @@ from app.services.router_service import (
     _record_failure,
     _update_quota,
 )
-from app.services.routing_service import is_auto, choose_models
+from app.services.routing_service import is_auto, choose_embedding_models, choose_models
 from app.services import key_service
 
 _CONTROL_FIELDS = {"model"}
@@ -190,8 +190,15 @@ async def embeddings(
     body: dict,
     preferred_provider_id: str | None = None,
 ) -> dict:
-    model = body.get("model", "")
-    attempts = _resolve_attempts(db, user_id, model, preferred_provider_id, None)
+    model = body.get("model", "auto")
+    if is_auto(model):
+        ranked = choose_embedding_models(db, user_id, preferred_provider_id)
+        attempts = _resolve_attempts(
+            db, user_id, "", preferred_provider_id,
+            [(model_id, provider_id) for model_id, provider_id, _reason in ranked],
+        )
+    else:
+        attempts = _resolve_attempts(db, user_id, model, preferred_provider_id, None)
     if not attempts:
         raise NoProvidersError("No enabled providers can serve this embedding model.")
 
@@ -224,6 +231,12 @@ async def embeddings(
             if pk:
                 tokens = data.get("usage", {}).get("total_tokens", 0)
                 key_service.record_usage(db, pk, dict(resp.headers), tokens)
+            # Consumers that persist vectors (the knowledge worker) need the
+            # concrete embedding space rather than the caller's `auto` alias.
+            # The extra provider field is intentionally namespaced and ignored
+            # by ordinary OpenAI-compatible clients.
+            data["model"] = attempt_model
+            data["_openagent_provider_id"] = str(provider.id)
             return data
         except httpx.HTTPError as exc:
             error_msg = f"Provider '{provider.name}' error: {exc}"

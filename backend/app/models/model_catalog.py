@@ -30,6 +30,9 @@ class ModelCatalog(Base):
     error_rate = Column(Float, nullable=True)
     last_stats_at = Column(DateTime, nullable=True)
     is_free = Column(Boolean, default=False, nullable=False)
+    # Embedding models share the provider model discovery path, but must never
+    # appear in the chat model picker or normal chat routing candidates.
+    is_embedding = Column(Boolean, default=False, nullable=False)
     is_enabled = Column(Boolean, default=True)
     last_seen_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

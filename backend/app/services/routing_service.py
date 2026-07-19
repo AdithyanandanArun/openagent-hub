@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.models.provider import Provider
 from app.services.catalog_service import get_catalog
+from app.services.catalog_service import get_embedding_catalog
 
 AUTO_MODEL = "auto"
 
@@ -249,6 +250,49 @@ def choose_models(
         reason = ", ".join(reasons) if reasons else "general"
         out.append((e.model_id, str(e.provider_id), reason))
     return out
+
+
+def _embedding_quality(model_id: str) -> int:
+    """A small deterministic ranking for embedding models within a provider."""
+    mid = model_id.lower()
+    score = 0
+    if any(term in mid for term in ("large", "m3", "multilingual", "gemini-embedding")):
+        score += 30
+    if any(term in mid for term in ("v3", "v4", "001", "3-small")):
+        score += 15
+    if "small" in mid:
+        score += 4
+    return score
+
+
+def choose_embedding_models(
+    db: Session,
+    user_id: UUID,
+    preferred_provider_id: str | None = None,
+) -> list[tuple[str, str, str]]:
+    """Order discovered embedding models by quality, provider health and preference.
+
+    The selected provider is preferred, while every enabled provider with a
+    discovered embedding endpoint remains a fallback. This mirrors chat's
+    provider failover without exposing a brittle model dropdown in settings.
+    """
+    providers = _provider_health(db, user_id)
+    scored: list[tuple[float, object, str]] = []
+    for entry in get_embedding_catalog(db, user_id):
+        provider = providers.get(str(entry.provider_id))
+        if provider is None:
+            continue
+        penalty, health_reason = _health_penalty(provider)
+        score = float(_embedding_quality(entry.model_id) - penalty)
+        if preferred_provider_id and str(entry.provider_id) == preferred_provider_id:
+            score += 100.0
+        reason = "preferred provider" if preferred_provider_id and str(entry.provider_id) == preferred_provider_id else "fallback provider"
+        if health_reason:
+            reason = f"{reason}, {health_reason}"
+        scored.append((score, entry, reason))
+
+    scored.sort(key=lambda item: (-item[0], item[1].provider_name or "", item[1].model_id))
+    return [(entry.model_id, str(entry.provider_id), reason) for _score, entry, reason in scored]
 
 
 def describe_profile(messages: list[dict], has_image: bool = False) -> str:

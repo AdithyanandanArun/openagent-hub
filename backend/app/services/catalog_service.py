@@ -38,6 +38,14 @@ _NON_CHAT_PATTERNS = (
 )
 
 
+def _is_embedding_model(model_id: str) -> bool:
+    """Recognise OpenAI-compatible embedding endpoints without provider lock-in."""
+    mid = model_id.lower()
+    return ("embedding" in mid or "embed" in mid) and not any(
+        blocked in mid for blocked in ("image", "audio", "video", "speech", "rerank")
+    )
+
+
 def _is_chat_model(model_id: str) -> bool:
     mid = model_id.lower()
     return not any(p in mid for p in _NON_CHAT_PATTERNS)
@@ -51,7 +59,8 @@ def sync_provider_models(db: Session, user_id: UUID, provider: Provider, model_i
             continue
         seen.add(mid)
 
-        if not _is_chat_model(mid):
+        is_embedding = _is_embedding_model(mid)
+        if not _is_chat_model(mid) and not is_embedding:
             continue
 
         free = _is_model_free(mid, provider.name)
@@ -72,6 +81,7 @@ def sync_provider_models(db: Session, user_id: UUID, provider: Provider, model_i
             existing.last_seen_at = now
             existing.provider_name = provider.name
             existing.is_free = True
+            existing.is_embedding = is_embedding
             existing.speed_score = caps["speed_score"]
             existing.coding_score = caps["coding_score"]
             existing.knowledge_score = caps["knowledge_score"]
@@ -87,6 +97,7 @@ def sync_provider_models(db: Session, user_id: UUID, provider: Provider, model_i
                 model_id=mid,
                 provider_name=provider.name,
                 is_free=True,
+                is_embedding=is_embedding,
                 last_seen_at=now,
                 **caps,
             )
@@ -104,7 +115,7 @@ def sync_provider_models(db: Session, user_id: UUID, provider: Provider, model_i
         )
         .all()
     ):
-        if not _is_chat_model(stale.model_id):
+        if stale.model_id not in seen:
             stale.is_enabled = False
     db.commit()
 
@@ -143,12 +154,29 @@ def get_catalog(db: Session, user_id: UUID, free_only: bool = True) -> list[Mode
         .filter(
             ModelCatalog.user_id == user_id,
             ModelCatalog.is_enabled == True,
+            ModelCatalog.is_embedding == False,
             Provider.enabled == True,
         )
     )
     if free_only:
         q = q.filter(ModelCatalog.is_free == True)
     return q.order_by(ModelCatalog.provider_name, ModelCatalog.model_id).all()
+
+
+def get_embedding_catalog(db: Session, user_id: UUID) -> list[ModelCatalog]:
+    """Return discovered embedding models for automatic knowledge routing."""
+    return (
+        db.query(ModelCatalog)
+        .join(Provider, Provider.id == ModelCatalog.provider_id)
+        .filter(
+            ModelCatalog.user_id == user_id,
+            ModelCatalog.is_enabled == True,
+            ModelCatalog.is_embedding == True,
+            Provider.enabled == True,
+        )
+        .order_by(ModelCatalog.provider_name, ModelCatalog.model_id)
+        .all()
+    )
 
 
 def purge_paid_models(db: Session, user_id: UUID) -> int:
