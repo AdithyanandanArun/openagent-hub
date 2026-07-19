@@ -5,6 +5,7 @@ import asyncio
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
 
 from app.models.attachment import Attachment
 from app.models.knowledge_source import KnowledgeSource
@@ -84,6 +85,8 @@ async def search_knowledge(db: Session, user_id: UUID, query: str, project_id: U
     vector = (response.get("data") or [{}])[0].get("embedding")
     if not isinstance(vector, list): raise HTTPException(status_code=502, detail="Embedding provider returned an invalid vector")
     query_rows = db.query(KnowledgeChunk, KnowledgeSource, KnowledgeChunk.embedding.cosine_distance(vector).label("distance")).join(KnowledgeSource, KnowledgeChunk.source_id == KnowledgeSource.id).filter(KnowledgeChunk.user_id == user_id, KnowledgeSource.status == "ready")
-    if project_id: query_rows = query_rows.filter(KnowledgeSource.project_id == project_id)
-    if conversation_id: query_rows = query_rows.filter(KnowledgeSource.conversation_id == conversation_id)
+    scope = [and_(KnowledgeSource.project_id.is_(None), KnowledgeSource.conversation_id.is_(None))]
+    if project_id: scope.append(KnowledgeSource.project_id == project_id)
+    if conversation_id: scope.append(KnowledgeSource.conversation_id == conversation_id)
+    query_rows = query_rows.filter(or_(*scope))
     return [{"source_id": str(source.id), "source_name": source.name, "content": chunk.content, "score": round(1 - float(distance), 4)} for chunk, source, distance in query_rows.order_by("distance").limit(limit).all()]
