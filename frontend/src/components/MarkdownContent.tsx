@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Copy, Check } from 'lucide-react';
+
+const SyntaxCodeBlock = lazy(() => import('./SyntaxCodeBlock'));
 
 function CopyButton({ text, size = 12 }: { text: string; size?: number }) {
   const [copied, setCopied] = useState(false);
@@ -50,15 +50,9 @@ export function MarkdownContent({ children }: { children: string }) {
                     <CopyButton text={codeStr} size={12} />
                   </div>
                   <div className="overflow-x-auto">
-                    <SyntaxHighlighter
-                      style={oneDark}
-                      language={match[1]}
-                      PreTag="div"
-                      customStyle={{ margin: 0, borderRadius: 0, fontSize: '0.78rem', background: '#111' }}
-                      {...props}
-                    >
-                      {codeStr}
-                    </SyntaxHighlighter>
+                    <Suspense fallback={<pre className="m-0 bg-zinc-950 p-3 text-xs text-zinc-200">{codeStr}</pre>}>
+                      <SyntaxCodeBlock code={codeStr} language={match[1]} />
+                    </Suspense>
                   </div>
                 </div>
               );

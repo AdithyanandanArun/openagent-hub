@@ -1,14 +1,14 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { lazy, Suspense, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Bot } from 'lucide-react';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Wrench, Terminal, CheckCircle2, Zap } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { ConversationDetail } from '../services/chat';
+
+const SyntaxCodeBlock = lazy(() => import('./SyntaxCodeBlock'));
 
 interface ToolActivity {
   tool: string;
@@ -123,18 +123,18 @@ export function ChatWindow({ conversation, isStreaming, streamingContent, stream
   if (!conversation && !isStreaming) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-zinc-500 select-none">
-        <div className="w-16 h-16 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
+        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-zinc-800 flex items-center justify-center mb-4">
           <Bot size={30} className="text-zinc-400" />
         </div>
-        <h2 className="text-xl font-semibold text-zinc-300 mb-1">OpenAgent Hub</h2>
-        <p className="text-sm">Start a conversation below</p>
+        <h2 className="text-lg sm:text-xl font-semibold text-zinc-300 mb-1">OpenAgent Hub</h2>
+        <p className="text-sm px-4 text-center">Start a conversation below</p>
       </div>
     );
   }
 
   return (
     <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" onScroll={handleScroll}>
-      <div className="py-4 max-w-5xl mx-auto w-full">
+      <div className="py-3 sm:py-4 max-w-5xl mx-auto w-full">
         {conversation?.messages.map((msg, idx, arr) => {
           const isLastAssistant =
             msg.role === 'assistant' &&
@@ -177,9 +177,9 @@ export function ChatWindow({ conversation, isStreaming, streamingContent, stream
                         <div className="my-3 rounded-xl overflow-hidden border border-zinc-700">
                           <div className="bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400 border-b border-zinc-700">{match[1]}</div>
                           <div className="overflow-x-auto">
-                            <SyntaxHighlighter style={oneDark} language={match[1]} PreTag="div" customStyle={{ margin: 0, borderRadius: 0, fontSize: '0.8rem', background: '#111' }} {...props}>
-                              {String(children).replace(/\n$/, '')}
-                            </SyntaxHighlighter>
+                            <Suspense fallback={<pre className="m-0 bg-zinc-950 p-3 text-xs text-zinc-200">{String(children).replace(/\n$/, '')}</pre>}>
+                              <SyntaxCodeBlock code={String(children).replace(/\n$/, '')} language={match[1]} />
+                            </Suspense>
                           </div>
                         </div>
                       );

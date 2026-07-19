@@ -60,9 +60,9 @@ export function useProviders() {
   }, [providers]);
 
   useEffect(() => {
-    loadProviders().then((list) => {
-      if (list.length > 0) loadAllModels(list);
-    });
+    // Model metadata is served from the local catalog on initial load. Avoid
+    // fanning out to every provider's /models endpoint when a user signs in.
+    loadProviders();
   }, [loadProviders]);
 
   const addProvider = useCallback(async (data: Parameters<typeof createProvider>[0]) => {

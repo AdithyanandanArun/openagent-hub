@@ -116,7 +116,7 @@ function ModelPicker({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 mb-1 w-72 bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+          <div className="absolute bottom-full left-0 mb-1 w-72 max-w-[calc(100vw-1.5rem)] bg-zinc-800 border border-zinc-700 rounded-xl shadow-2xl z-50 overflow-hidden">
             {hasProviders && (
               <button type="button"
                 onMouseDown={(e) => { e.preventDefault(); onChange('auto', null); setOpen(false); }}
@@ -277,7 +277,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
   const canSend = !isStreaming && !disabled && !uploading && (value.trim().length > 0 || attachments.length > 0);
 
   return (
-    <div className="px-4 pb-4 pt-1 max-w-5xl mx-auto w-full">
+    <div className="px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-1 sm:px-4 sm:pb-4 max-w-5xl mx-auto w-full">
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-2 px-1">
           {attachments.map((att) => (
@@ -292,7 +292,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
 
       <div className="bg-zinc-800 border border-zinc-700 rounded-2xl focus-within:border-zinc-500 transition-colors">
         {/* Text area */}
-        <div className="px-4 pt-3 pb-1 relative">
+        <div className="px-3 pt-3 pb-1 relative sm:px-4">
           <SlashCommandMenu ref={slashRef} commands={slashCommands} value={value} onPick={() => textareaRef.current?.focus()} placement="up" />
           <textarea
             ref={textareaRef}
@@ -309,8 +309,8 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
         </div>
 
         {/* Bottom bar */}
-        <div className="px-3 pb-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-1">
+        <div className="px-2.5 pb-2.5 flex items-center justify-between gap-1">
+          <div className="flex min-w-0 items-center gap-0.5 sm:gap-1">
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -363,7 +363,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
         onChange={handleFileChange}
       />
 
-      <p className="text-xs text-zinc-600 text-center mt-1.5">
+      <p className="hidden sm:block text-xs text-zinc-600 text-center mt-1.5">
         Enter to send · Shift+Enter for new line
       </p>
     </div>

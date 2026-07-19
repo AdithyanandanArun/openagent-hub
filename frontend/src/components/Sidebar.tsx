@@ -7,6 +7,9 @@ import { AgentRun, Agent } from '../services/agents';
 
 
 interface Props {
+  /** Drawer state on phones; the sidebar remains visible on desktop. */
+  isOpen?: boolean;
+  onClose?: () => void;
   /** Which workspace the sidebar reflects. */
   mode: 'chat' | 'agents';
 
@@ -108,9 +111,9 @@ function ConvItem({
       ) : (
         <>
           <span className="flex-1 truncate text-sm">{conv.title}</span>
-          <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
-            <button onClick={(e) => { e.stopPropagation(); setTitle(conv.title); setEditing(true); }} className="p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-zinc-300"><Edit2 size={11} /></button>
-            <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-red-400"><Trash2 size={11} /></button>
+          <div className="flex items-center gap-0.5 flex-shrink-0 md:hidden md:group-hover:flex">
+            <button onClick={(e) => { e.stopPropagation(); setTitle(conv.title); setEditing(true); }} className="p-2 md:p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-zinc-300" aria-label={`Rename ${conv.title}`}><Edit2 size={11} /></button>
+            <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-2 md:p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-red-400" aria-label={`Delete ${conv.title}`}><Trash2 size={11} /></button>
           </div>
         </>
       )}
@@ -143,7 +146,8 @@ function RunItem({
       </div>
       <button
         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        className="hidden group-hover:block p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-red-400 flex-shrink-0"
+        className="block p-2 md:hidden md:group-hover:block md:p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-red-400 flex-shrink-0"
+        aria-label={`Delete agent run: ${run.goal}`}
       >
         <Trash2 size={11} />
       </button>
@@ -187,9 +191,9 @@ function ProjectItem({
       ) : (
         <>
           <span className="flex-1 truncate text-sm">{project.name}</span>
-          <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
-            <button onClick={(e) => { e.stopPropagation(); setName(project.name); setEditing(true); }} className="p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-zinc-300"><Edit2 size={11} /></button>
-            <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-red-400"><Trash2 size={11} /></button>
+          <div className="flex items-center gap-0.5 flex-shrink-0 md:hidden md:group-hover:flex">
+            <button onClick={(e) => { e.stopPropagation(); setName(project.name); setEditing(true); }} className="p-2 md:p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-zinc-300" aria-label={`Rename ${project.name}`}><Edit2 size={11} /></button>
+            <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-2 md:p-1 rounded hover:bg-zinc-600 text-zinc-500 hover:text-red-400" aria-label={`Delete ${project.name}`}><Trash2 size={11} /></button>
           </div>
         </>
       )}
@@ -198,6 +202,7 @@ function ProjectItem({
 }
 
 export function Sidebar({
+  isOpen = false, onClose,
   mode,
   conversations, currentId, onSelect, onNew, onDelete, onRename,
   projects, selectedProjectId, onSelectProject, onAddProject, onRenameProject, onDeleteProject,
@@ -230,14 +235,24 @@ export function Sidebar({
     setAddingProject(false);
   };
 
+  const closeDrawer = () => onClose?.();
+
   return (
-    <div className="w-64 bg-zinc-900 flex flex-col h-full flex-shrink-0">
+    <>
+      {isOpen && <div className="fixed inset-0 z-40 bg-black/60 md:hidden" onClick={closeDrawer} aria-hidden="true" />}
+      <aside
+        aria-label="Workspace navigation"
+        className={clsx(
+          'fixed inset-y-0 left-0 z-50 flex h-full w-[min(18rem,calc(100vw-2rem))] flex-col bg-zinc-900 shadow-2xl transition-transform duration-200 md:static md:z-auto md:w-64 md:flex-shrink-0 md:translate-x-0 md:shadow-none',
+          isOpen ? 'translate-x-0' : '-translate-x-full',
+        )}
+      >
       {/* Header */}
       <div className="px-3 pt-3 pb-2 flex items-center justify-between">
         <span className="text-sm font-semibold text-zinc-200 px-1">OpenAgent Hub</span>
         <button
-          onClick={isAgents ? onNewRun : onNew}
-          className="p-1.5 rounded-lg hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
+          onClick={() => { (isAgents ? onNewRun : onNew)?.(); closeDrawer(); }}
+          className="min-h-10 min-w-10 p-1.5 rounded-lg hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
           title={isAgents ? 'New run' : 'New chat'}
         >
           <SquarePen size={16} />
@@ -262,12 +277,15 @@ export function Sidebar({
         {/* Saved agents (agents mode only) */}
         {isAgents && (
           <div className="mb-1">
-            <button
-              onClick={() => setAgentsOpen((o) => !o)}
-              className="w-full flex items-center gap-1 px-2 py-1.5 text-zinc-500 text-xs font-medium uppercase tracking-wide hover:text-zinc-300 transition-colors rounded-lg hover:bg-zinc-800"
-            >
-              {agentsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-              <span>Agents</span>
+            <div className="flex items-center gap-1 px-2 py-1.5 text-zinc-500 text-xs font-medium uppercase tracking-wide rounded-lg hover:bg-zinc-800">
+              <button
+                onClick={() => setAgentsOpen((o) => !o)}
+                className="flex min-w-0 flex-1 items-center gap-1 text-left hover:text-zinc-300 transition-colors"
+                aria-expanded={agentsOpen}
+              >
+                {agentsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                <span>Agents</span>
+              </button>
               <button
                 onClick={(e) => { e.stopPropagation(); onManageAgents?.(); }}
                 className="ml-auto p-0.5 rounded hover:bg-zinc-700 text-zinc-600 hover:text-zinc-300"
@@ -275,7 +293,7 @@ export function Sidebar({
               >
                 <Plus size={12} />
               </button>
-            </button>
+            </div>
             {agentsOpen && (
               <div className="mt-0.5 space-y-0.5">
                 {agents.length === 0 ? (
@@ -289,7 +307,7 @@ export function Sidebar({
                   <div
                     key={a.id}
                     className="group flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
-                    onClick={() => onUseAgent?.(a)}
+                    onClick={() => { onUseAgent?.(a); closeDrawer(); }}
                     title={a.description || a.name}
                   >
                     <Bot size={13} className="flex-shrink-0 text-blue-400" />
@@ -311,12 +329,15 @@ export function Sidebar({
 
         {/* Projects (shared) */}
         <div className="mb-1">
-          <button
-            onClick={() => setProjectsOpen((o) => !o)}
-            className="w-full flex items-center gap-1 px-2 py-1.5 text-zinc-500 text-xs font-medium uppercase tracking-wide hover:text-zinc-300 transition-colors rounded-lg hover:bg-zinc-800"
-          >
-            {projectsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-            <span>Projects</span>
+          <div className="flex items-center gap-1 px-2 py-1.5 text-zinc-500 text-xs font-medium uppercase tracking-wide rounded-lg hover:bg-zinc-800">
+            <button
+              onClick={() => setProjectsOpen((o) => !o)}
+              className="flex min-w-0 flex-1 items-center gap-1 text-left hover:text-zinc-300 transition-colors"
+              aria-expanded={projectsOpen}
+            >
+              {projectsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              <span>Projects</span>
+            </button>
             <button
               onClick={(e) => { e.stopPropagation(); setAddingProject(true); setProjectsOpen(true); }}
               className="ml-auto p-0.5 rounded hover:bg-zinc-700 text-zinc-600 hover:text-zinc-300"
@@ -324,7 +345,7 @@ export function Sidebar({
             >
               <FolderPlus size={12} />
             </button>
-          </button>
+          </div>
 
           {projectsOpen && (
             <div className="mt-0.5 space-y-0.5">
@@ -346,7 +367,7 @@ export function Sidebar({
                 </div>
               )}
               <div
-                onClick={() => onSelectProject(null)}
+                onClick={() => { onSelectProject(null); closeDrawer(); }}
                 className={clsx(
                   'flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors',
                   selectedProjectId === null ? 'bg-zinc-700/60 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
@@ -360,7 +381,7 @@ export function Sidebar({
                   key={p.id}
                   project={p}
                   isSelected={selectedProjectId === p.id}
-                  onSelect={() => onSelectProject(p.id)}
+                  onSelect={() => { onSelectProject(p.id); closeDrawer(); }}
                   onRename={(name) => onRenameProject(p.id, name)}
                   onDelete={() => onDeleteProject(p.id)}
                 />
@@ -382,7 +403,7 @@ export function Sidebar({
                 <span className="text-zinc-600 text-[10px] uppercase tracking-wide font-medium">Run history</span>
                 {runs.length > 0 && (
                   <button
-                    onClick={() => { if (confirm('Delete all run history? This cannot be undone.')) onClearRuns?.(); }}
+                    onClick={() => onClearRuns?.()}
                     className="text-[10px] text-zinc-600 hover:text-red-400"
                   >
                     Clear
@@ -398,7 +419,7 @@ export function Sidebar({
                         key={r.id}
                         run={r}
                         isActive={currentRunId === r.id}
-                        onSelect={() => onSelectRun?.(r.id)}
+                        onSelect={() => { onSelectRun?.(r.id); closeDrawer(); }}
                         onDelete={() => onDeleteRun?.(r.id)}
                       />
                     ))}
@@ -419,7 +440,7 @@ export function Sidebar({
                     key={conv.id}
                     conv={conv}
                     isActive={currentId === conv.id}
-                    onSelect={() => onSelect(conv.id)}
+                    onSelect={() => { onSelect(conv.id); closeDrawer(); }}
                     onRename={(title) => onRename(conv.id, title)}
                     onDelete={() => onDelete(conv.id)}
                   />
@@ -437,10 +458,10 @@ export function Sidebar({
             {username.charAt(0).toUpperCase()}
           </div>
           <span className="flex-1 text-sm text-zinc-300 truncate">{username}</span>
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
             <button
-              onClick={onOpenSettings}
-              className="p-1.5 rounded-md hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
+              onClick={() => { onOpenSettings(); closeDrawer(); }}
+              className="p-2 rounded-md hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300 transition-colors"
               title="Settings"
             >
               <Settings size={13} />
@@ -448,6 +469,7 @@ export function Sidebar({
           </div>
         </div>
       </div>
-    </div>
+      </aside>
+    </>
   );
 }

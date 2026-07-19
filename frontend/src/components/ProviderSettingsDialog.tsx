@@ -541,20 +541,19 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
   const [activeTab, setActiveTab] = useState<Tab>('providers');
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 sm:p-4" onClick={onClose}>
       <div
-        className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-4xl shadow-2xl flex overflow-hidden"
-        style={{ height: 'min(88vh, 720px)' }}
+        className="bg-zinc-900 border-0 sm:border border-zinc-700 rounded-none sm:rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col sm:flex-row overflow-hidden h-[100dvh] sm:h-[min(88vh,720px)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Sidebar */}
-        <div className="w-56 bg-zinc-950/60 border-r border-zinc-800 flex flex-col p-3 flex-shrink-0">
-          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-widest px-2 py-2 mb-1">Settings</p>
-          <nav className="flex flex-col gap-0.5 flex-1">
+        <div className="w-full sm:w-56 bg-zinc-950/60 border-b sm:border-b-0 sm:border-r border-zinc-800 flex flex-col p-2 sm:p-3 flex-shrink-0">
+          <p className="hidden sm:block text-xs font-semibold text-zinc-500 uppercase tracking-widest px-2 py-2 mb-1">Settings</p>
+          <nav className="flex flex-row sm:flex-col gap-0.5 flex-1 overflow-x-auto sm:overflow-visible">
             {TABS.map((tab) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                 className={clsx(
-                  'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-colors w-full',
+                  'flex flex-shrink-0 items-center gap-2 sm:gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-colors sm:w-full',
                   activeTab === tab.id ? 'bg-zinc-700/70 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
                 )}>
                 {tab.icon}{tab.label}
@@ -565,11 +564,11 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
 
         {/* Content */}
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+          <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 border-b border-zinc-800">
             <h2 className="text-sm font-semibold text-white">{TABS.find((t) => t.id === activeTab)?.label}</h2>
             <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors"><X size={15} /></button>
           </div>
-          <div className="flex-1 overflow-y-auto px-7 py-6">
+          <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-7 sm:py-6">
             {activeTab === 'general' && <GeneralTab />}
             {activeTab === 'providers' && <ProvidersTab onProvidersChange={onProvidersChange} />}
             {activeTab === 'tokens' && <TokensTab />}

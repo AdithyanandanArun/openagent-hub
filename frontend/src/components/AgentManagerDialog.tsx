@@ -66,16 +66,16 @@ export function AgentManagerDialog({ agents, skills, models, onClose, onCreate, 
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 sm:p-4" onMouseDown={onClose}>
       <div
-        className="w-full max-w-3xl max-h-[85vh] bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+        className="w-full max-w-3xl h-[100dvh] sm:h-auto sm:max-h-[85vh] bg-zinc-900 border-0 sm:border border-zinc-700 rounded-none sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center gap-2 px-5 py-3.5 border-b border-zinc-800">
+        <div className="flex items-center gap-2 px-4 py-3 sm:px-5 sm:py-3.5 border-b border-zinc-800">
           <Bot size={18} className="text-blue-400" />
           <h2 className="text-sm font-semibold text-zinc-100">Agents</h2>
-          <span className="text-xs text-zinc-600">Build and store agents your tasks can reuse.</span>
+          <span className="hidden sm:inline text-xs text-zinc-600">Build and store agents your tasks can reuse.</span>
           <div className="ml-auto flex items-center gap-2">
             {!draft && (
               <button onClick={startNew}
@@ -90,7 +90,7 @@ export function AgentManagerDialog({ agents, skills, models, onClose, onCreate, 
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5">
           {draft ? (
             <div className="space-y-3 max-w-2xl">
               <div>
@@ -122,7 +122,7 @@ export function AgentManagerDialog({ agents, skills, models, onClose, onCreate, 
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500 resize-none"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-zinc-400 mb-1">Default model</label>
                   <select
@@ -173,7 +173,7 @@ export function AgentManagerDialog({ agents, skills, models, onClose, onCreate, 
               <p className="text-xs mt-1 text-zinc-700">Create one to reuse a persona, model, and skill across tasks.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {agents.map((a) => (
                 <div key={a.id} className="group bg-zinc-800/60 border border-zinc-700 rounded-xl p-3.5 flex flex-col">
                   <div className="flex items-start gap-2">

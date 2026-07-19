@@ -13,6 +13,9 @@ spec:
       annotations:
         autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "3"
+        # Reduces cold-start time without keeping an instance permanently warm.
+        # A minScale of 1 is the next latency lever, but incurs recurring cost.
+        run.googleapis.com/startup-cpu-boost: "true"
         run.googleapis.com/container-dependencies: '{"frontend":["backend"]}'
         run.googleapis.com/execution-environment: gen2
     spec:

@@ -10,6 +10,7 @@ from app.api import (
 )
 from app.services.health_probe import run_health_probes
 from app.core.config import settings
+from app.core.provider import start_http_client, close_http_client
 
 
 def _patch_playwright_servers():
@@ -35,11 +36,15 @@ def _patch_playwright_servers():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.validate_runtime()
+    await start_http_client()
     _patch_playwright_servers()
     task = asyncio.create_task(run_health_probes()) if settings.ENABLE_HEALTH_PROBES else None
-    yield
-    if task:
-        task.cancel()
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+        await close_http_client()
 
 
 app = FastAPI(title="OpenAgent Hub", version="0.1.0", lifespan=lifespan)

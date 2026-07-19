@@ -24,7 +24,7 @@ _CITATION_RE = re.compile(r'【\d+†[^\】]*】')
 from app.core.database import SessionLocal
 from app.core import crypto
 from app.core.mcp_client import MCPSessionPool
-from app.core.provider import stream_chat
+from app.core.provider import get_http_client, stream_chat
 from app.services import agent_tools
 from app.services.provider_service import has_enabled_providers
 from app.services.router_service import _ordered_providers, _is_circuit_open, _record_success, _record_failure, _resolve_attempts
@@ -52,48 +52,48 @@ async def _stream_one_turn(provider, model, messages, tools, on_event, tool_choi
     # tool_calls accumulate across deltas keyed by index
     tool_calls: dict[int, dict] = {}
 
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        async with client.stream("POST", f"{provider.base_url}/chat/completions",
-                                 headers=headers, json=payload) as response:
-            if response.status_code >= 400:
-                error_body = ""
-                async for chunk in response.aiter_bytes():
-                    error_body += chunk.decode(errors="replace")
-                    if len(error_body) > 500:
-                        break
-                raise httpx.HTTPStatusError(
-                    f"HTTP {response.status_code}: {error_body[:500]}",
-                    request=response.request,
-                    response=response,
-                )
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                data = line[6:]
-                if data == "[DONE]":
+    client = await get_http_client()
+    async with client.stream("POST", f"{provider.base_url}/chat/completions",
+                             headers=headers, json=payload, timeout=180.0) as response:
+        if response.status_code >= 400:
+            error_body = ""
+            async for chunk in response.aiter_bytes():
+                error_body += chunk.decode(errors="replace")
+                if len(error_body) > 500:
                     break
-                try:
-                    chunk = json.loads(data)
-                    delta = chunk["choices"][0].get("delta", {})
-                except (json.JSONDecodeError, KeyError, IndexError):
-                    continue
+            raise httpx.HTTPStatusError(
+                f"HTTP {response.status_code}: {error_body[:500]}",
+                request=response.request,
+                response=response,
+            )
+        async for line in response.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            data = line[6:]
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+                delta = chunk["choices"][0].get("delta", {})
+            except (json.JSONDecodeError, KeyError, IndexError):
+                continue
 
-                if content := delta.get("content"):
-                    content = _CITATION_RE.sub("", content)
-                    if content:
-                        content_parts.append(content)
-                        await on_event({"type": "chunk", "content": content})
+            if content := delta.get("content"):
+                content = _CITATION_RE.sub("", content)
+                if content:
+                    content_parts.append(content)
+                    await on_event({"type": "chunk", "content": content})
 
-                for tc in delta.get("tool_calls", []) or []:
-                    idx = tc.get("index", 0)
-                    slot = tool_calls.setdefault(idx, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-                    if tc.get("id"):
-                        slot["id"] = tc["id"]
-                    fn = tc.get("function", {})
-                    if fn.get("name"):
-                        slot["function"]["name"] = fn["name"]
-                    if fn.get("arguments"):
-                        slot["function"]["arguments"] += fn["arguments"]
+            for tc in delta.get("tool_calls", []) or []:
+                idx = tc.get("index", 0)
+                slot = tool_calls.setdefault(idx, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function", {})
+                if fn.get("name"):
+                    slot["function"]["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["function"]["arguments"] += fn["arguments"]
 
     message: dict = {"role": "assistant", "content": "".join(content_parts)}
     if tool_calls:

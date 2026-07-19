@@ -8,6 +8,11 @@ html, body, #root {
   background-color: #09090b; /* zinc-950 — prevents white flash/bleed in dark mode */
 }
 
+body {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: #3f3f46 transparent;

@@ -6,6 +6,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core import crypto
+from app.core.provider import get_http_client
 from app.models.provider import Provider
 from app.models.provider_key import ProviderKey
 from app.schemas.provider import ProviderCreate, ProviderUpdate, ProviderTestResult
@@ -152,11 +153,11 @@ async def test_provider(db: Session, user_id: UUID, provider_id: UUID) -> Provid
     try:
         key = crypto.decrypt(p.api_key)
         headers = {"Authorization": f"Bearer {key}"} if key else {}
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(_models_endpoint(p), headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-            objects = _parse_model_objects(data)
+        client = await get_http_client()
+        resp = await client.get(_models_endpoint(p), headers=headers, timeout=15.0)
+        resp.raise_for_status()
+        data = resp.json()
+        objects = _parse_model_objects(data)
         # Keep only free models — drops paid/pro tiers (LLM7 tier:pro, pricing>0)
         # and applies the provider's free-name rule (:free, -free, …).
         models = filter_free_model_objects(objects, name=p.name, base_url=p.base_url)
@@ -177,11 +178,11 @@ async def fetch_provider_models(db: Session, user_id: UUID, provider_id: UUID) -
     p = get_provider(db, user_id, provider_id)
     key = crypto.decrypt(p.api_key)
     headers = {"Authorization": f"Bearer {key}"} if key else {}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(_models_endpoint(p), headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-        objects = _parse_model_objects(data)
+    client = await get_http_client()
+    resp = await client.get(_models_endpoint(p), headers=headers, timeout=15.0)
+    resp.raise_for_status()
+    data = resp.json()
+    objects = _parse_model_objects(data)
     # Surface only free models (drops paid/pro tiers; no-op for unknown providers).
     return filter_free_model_objects(objects, name=p.name, base_url=p.base_url)
 

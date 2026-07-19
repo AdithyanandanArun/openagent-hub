@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MessageSquare, Bot } from 'lucide-react';
+import { MessageSquare, Bot, Menu } from 'lucide-react';
 import clsx from 'clsx';
 import { Sidebar } from '../components/Sidebar';
 import { ChatWindow } from '../components/ChatWindow';
@@ -7,6 +7,7 @@ import { ChatInput } from '../components/ChatInput';
 import { ProviderSettingsDialog } from '../components/ProviderSettingsDialog';
 import { AgentsView } from '../components/AgentsView';
 import { AgentManagerDialog } from '../components/AgentManagerDialog';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useChat } from '../hooks/useChat';
 import { useProjects } from '../hooks/useProjects';
 import { useProviderSettings } from '../hooks/useProviderSettings';
@@ -23,6 +24,13 @@ interface Props {
   user: User;
   onLogout: () => void;
   onDeleteAccount: (password: string) => Promise<void>;
+}
+
+interface PendingDeletion {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  action: () => Promise<void> | void;
 }
 
 export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
@@ -47,11 +55,25 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
 
   const { projects, loadProjects, addProject, renameProject, removeProject } = useProjects();
   const { config, availableModels, saveConfig, loadModels, loadConfig } = useProviderSettings();
-  const { providerModels, refreshModels } = useProviders();
-  const { catalog, sync: syncCatalog } = useCatalog();
+  const { providerModels } = useProviders();
+  const { catalog, loadCatalog } = useCatalog();
   const { skills } = useSkills();
   const { tools } = useAgentTools();
   const agents = useAgents();
+
+  // Use provider results when they have just been refreshed; otherwise use the
+  // already-synchronised catalog from our database so opening the app does not
+  // wait for every upstream provider's /models endpoint.
+  const resolvedProviderModels = useMemo(
+    () => providerModels.length
+      ? providerModels
+      : catalog.filter((m) => m.is_enabled).map((m) => ({
+        model: m.model_id,
+        provider_id: m.provider_id,
+        provider_name: m.provider_name,
+      })),
+    [providerModels, catalog],
+  );
 
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
@@ -65,6 +87,9 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
   const [showAgentManager, setShowAgentManager] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentPrefill, setAgentPrefill] = useState<{ goal?: string; mode?: AgentMode } | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     loadConversations(selectedProjectId);
@@ -88,11 +113,11 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
   // If routing providers are configured but nothing is selected yet, default to
   // "Auto" (smart routing) so a first message never 400s on an empty model.
   useEffect(() => {
-    if (!selectedModel && !config?.model && providerModels.length > 0) {
+    if (!selectedModel && !config?.model && resolvedProviderModels.length > 0) {
       setSelectedModel('auto');
       setSelectedProviderId(null);
     }
-  }, [providerModels, selectedModel, config]);
+  }, [resolvedProviderModels, selectedModel, config]);
 
   const handleModelChange = (model: string, providerId?: string | null) => {
     setSelectedModel(model);
@@ -121,8 +146,10 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
   };
 
   const handleProvidersChange = () => {
-    refreshModels();
-    syncCatalog();
+    // A successful provider test already synchronises that provider server-side.
+    // Refresh the local catalog only; do not re-test every provider after each
+    // save/toggle, which created unnecessary slow /models fan-out requests.
+    loadCatalog();
   };
 
   // Selecting a conversation or starting a new chat should always land the user
@@ -144,8 +171,18 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
   };
 
   const handleOpenSettings = () => {
-    loadModels().catch(() => {});
     setShowSettings(true);
+  };
+
+  const confirmDeletion = async () => {
+    if (!pendingDeletion) return;
+    setIsDeleting(true);
+    try {
+      await pendingDeletion.action();
+      setPendingDeletion(null);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // ── Agents-tab handlers ──────────────────────────────────────────────────────
@@ -168,24 +205,31 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
 
   // Model options for the agent manager's dropdown.
   const managerModels = useMemo(
-    () => providerModels.length
-      ? providerModels.map((m) => ({ model: m.model, provider_id: m.provider_id, provider_name: m.provider_name }))
+    () => resolvedProviderModels.length
+      ? resolvedProviderModels.map((m) => ({ model: m.model, provider_id: m.provider_id, provider_name: m.provider_name }))
       : availableModels.map((m) => ({ model: m, provider_id: null as string | null })),
-    [providerModels, availableModels],
+    [resolvedProviderModels, availableModels],
   );
 
   // Decide which model list to show: use providerModels if available, else flat list
-  const hasProviderModels = providerModels.length > 0;
+  const hasProviderModels = resolvedProviderModels.length > 0;
 
   return (
     <div className="flex h-screen bg-zinc-950 text-white overflow-hidden">
       <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
         mode={view}
         conversations={conversations}
         currentId={currentConversation?.id}
         onSelect={handleSelectConversation}
         onNew={handleNewChat}
-        onDelete={deleteConversation}
+        onDelete={(id) => setPendingDeletion({
+          title: 'Delete this chat?',
+          description: 'This permanently deletes the conversation and all of its messages. This cannot be undone.',
+          confirmLabel: 'Delete chat',
+          action: () => deleteConversation(id),
+        })}
         onRename={renameConversation}
         projects={projects}
         selectedProjectId={selectedProjectId}
@@ -196,8 +240,24 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
         runs={agents.runs}
         currentRunId={viewingRun?.id ?? null}
         onSelectRun={openRun}
-        onDeleteRun={(id) => { if (viewingRun?.id === id) setViewingRun(null); agents.removeRun(id); }}
-        onClearRuns={() => { setViewingRun(null); agents.clearAllRuns(); }}
+        onDeleteRun={(id) => setPendingDeletion({
+          title: 'Delete this agent run?',
+          description: 'This permanently deletes the run, its steps, and any child runs. This cannot be undone.',
+          confirmLabel: 'Delete run',
+          action: async () => {
+            if (viewingRun?.id === id) setViewingRun(null);
+            await agents.removeRun(id);
+          },
+        })}
+        onClearRuns={() => setPendingDeletion({
+          title: 'Delete all run history?',
+          description: 'This permanently deletes every saved agent run and its steps. This cannot be undone.',
+          confirmLabel: 'Delete all runs',
+          action: async () => {
+            setViewingRun(null);
+            await agents.clearAllRuns();
+          },
+        })}
         onNewRun={() => { setView('agents'); setViewingRun(null); }}
         agents={agents.agents}
         onManageAgents={() => { setView('agents'); setShowAgentManager(true); }}
@@ -208,7 +268,15 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
 
       <div className="flex-1 flex flex-col min-w-0 relative">
         {/* View switcher */}
-        <div className="flex items-center gap-1 px-3 py-2 border-b border-zinc-800 bg-zinc-950 flex-shrink-0">
+        <div className="flex items-center gap-1 px-2 py-2 sm:px-3 border-b border-zinc-800 bg-zinc-950 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden flex h-10 w-10 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+            aria-label="Open navigation"
+          >
+            <Menu size={19} />
+          </button>
           <button
             onClick={() => setView('chat')}
             className={clsx('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
@@ -246,7 +314,7 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
               disabled={!hasProviderModels && !config?.model && !selectedModel}
               model={selectedModel}
               availableModels={availableModels}
-              providerModels={hasProviderModels ? providerModels : undefined}
+              providerModels={hasProviderModels ? resolvedProviderModels : undefined}
               catalog={catalog}
               skills={skills}
               tools={tools}
@@ -257,7 +325,7 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
           </>
         ) : (
           <AgentsView
-            providerModels={providerModels}
+            providerModels={resolvedProviderModels}
             fallbackModel={selectedModel || config?.model || ''}
             catalog={catalog}
             availableModels={availableModels}
@@ -307,6 +375,17 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
           onLogout={onLogout}
           onDeleteAccount={onDeleteAccount}
           onProvidersChange={handleProvidersChange}
+        />
+      )}
+
+      {pendingDeletion && (
+        <ConfirmDialog
+          title={pendingDeletion.title}
+          description={pendingDeletion.description}
+          confirmLabel={pendingDeletion.confirmLabel}
+          busy={isDeleting}
+          onConfirm={confirmDeletion}
+          onCancel={() => !isDeleting && setPendingDeletion(null)}
         />
       )}
     </div>

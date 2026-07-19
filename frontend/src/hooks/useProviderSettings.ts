@@ -33,10 +33,11 @@ export function useProviderSettings() {
   }, []);
 
   useEffect(() => {
-    loadConfig().then((c) => {
-      if (c?.api_key) loadModels().catch(() => {});
-    });
-  }, [loadConfig, loadModels]);
+    // Loading the saved configuration is local and fast. Do not also call an
+    // arbitrary provider's /models endpoint on every login: free providers can
+    // be slow or rate-limited, and model discovery is available on demand.
+    loadConfig();
+  }, [loadConfig]);
 
   const saveConfig = useCallback(async (data: Partial<ProviderConfig>) => {
     const updated = await updateProviderConfig(data);
