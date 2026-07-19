@@ -65,6 +65,8 @@ spec:
               value: "false"
             - name: ENABLE_CUSTOM_MCP_SERVERS
               value: "false"
+            - name: ENABLE_REMOTE_MCP_CONNECTORS
+              value: "true"
             - name: ENABLE_WORKSPACE_OPEN
               value: "false"
             - name: STORAGE_BACKEND

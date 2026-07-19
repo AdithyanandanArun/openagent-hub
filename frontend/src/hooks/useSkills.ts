@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { listSkills, createSkill, updateSkill, deleteSkill, Skill } from '../services/skills';
+import { listSkills, createSkill, updateSkill, deleteSkill, importSkill, downloadSkill, Skill } from '../services/skills';
 
 export function useSkills() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -23,7 +23,14 @@ export function useSkills() {
     setSkills((p) => p.filter((x) => x.id !== id));
   }, []);
 
+  const importPackage = useCallback(async (skillMd: string) => {
+    const skill = await importSkill(skillMd);
+    setSkills((current) => [...current, skill]);
+  }, []);
+
+  const exportPackage = useCallback((id: string, name: string) => downloadSkill(id, name), []);
+
   useEffect(() => { load(); }, [load]);
 
-  return { skills, load, add, edit, remove };
+  return { skills, load, add, edit, remove, importPackage, exportPackage };
 }

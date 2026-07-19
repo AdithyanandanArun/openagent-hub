@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 from uuid import UUID
 
-from app.core.mcp_client import mcp_call_tool, MCPError, MCPSessionPool
+from app.core.mcp_client import mcp_call_http_tool, MCPError, MCPSessionPool
 from app.models.mcp_server import MCPServer
 from app.services import memory_service
 from app.core.config import settings
@@ -295,21 +295,15 @@ BUILTIN_TOOLS: dict[str, ToolDef] = {
 # --------------------------------------------------------------------------- #
 
 def _make_mcp_handler(server: MCPServer, tool_name: str) -> ToolHandler:
-    command = server.command
-    args = list(server.args or [])
-    env = dict(server.env or {})
-    auto_approve = server.auto_approve
-
     async def handler(ctx: ToolContext, call_args: dict) -> str:
-        if not auto_approve:
+        if tool_name not in set(server.read_only_tools or []):
             return (
-                f"[blocked] The MCP server '{server.name}' requires manual approval for its tools. "
-                "Enable auto-approve in MCP settings to allow this call."
+                f"[confirmation required] '{server.name}.{tool_name}' is not allowlisted as read-only. "
+                "OpenAgent will not run connector write actions automatically."
             )
         try:
-            if ctx.session_pool is not None:
-                return await ctx.session_pool.call_tool(command, tool_name, call_args, args=args, env=env)
-            return await mcp_call_tool(command, tool_name, call_args, args=args, env=env)
+            from app.services.mcp_service import connector_headers
+            return await mcp_call_http_tool(server.url, tool_name, call_args, connector_headers(server))
         except MCPError as exc:
             return f"[mcp error] {exc}"
         except Exception as exc:  # noqa: BLE001
@@ -327,11 +321,11 @@ def _mcp_tool_name(server_name: str, tool_name: str) -> str:
 
 def get_mcp_tools(db, user_id: UUID) -> dict[str, ToolDef]:
     """Build ToolDefs from the user's enabled MCP servers, using each server's cached tool list."""
-    if not settings.ENABLE_CUSTOM_MCP_SERVERS:
+    if not settings.ENABLE_REMOTE_MCP_CONNECTORS:
         return {}
     servers = (
         db.query(MCPServer)
-        .filter(MCPServer.user_id == user_id, MCPServer.enabled == True)
+        .filter(MCPServer.user_id == user_id, MCPServer.enabled == True, MCPServer.transport == "streamable_http")
         .all()
     )
     tools: dict[str, ToolDef] = {}

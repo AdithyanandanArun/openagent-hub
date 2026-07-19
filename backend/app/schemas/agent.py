@@ -157,23 +157,22 @@ class AgentRunDetailResponse(AgentRunResponse):
 
 class MCPServerCreate(BaseModel):
     name: str
-    transport: str = "stdio"
-    command: Optional[str] = None
-    args: Optional[List[str]] = None
-    url: Optional[str] = None
-    env: Optional[dict] = None
+    url: str
+    auth_type: str = "none"
+    auth_value: Optional[str] = None
+    auth_header_name: Optional[str] = None
+    read_only_tools: Optional[List[str]] = None
     enabled: bool = True
-    auto_approve: bool = True
 
 
 class MCPServerUpdate(BaseModel):
     name: Optional[str] = None
-    command: Optional[str] = None
-    args: Optional[List[str]] = None
     url: Optional[str] = None
-    env: Optional[dict] = None
+    auth_type: Optional[str] = None
+    auth_value: Optional[str] = None
+    auth_header_name: Optional[str] = None
+    read_only_tools: Optional[List[str]] = None
     enabled: Optional[bool] = None
-    auto_approve: Optional[bool] = None
 
 
 class MCPServerResponse(BaseModel):
@@ -188,5 +187,8 @@ class MCPServerResponse(BaseModel):
     status: str
     tools_cache: Optional[Any]
     last_checked_at: Optional[datetime]
+    auth_type: str
+    read_only_tools: Optional[List[str]]
+    requires_confirmation: bool
 
     model_config = {"from_attributes": True}

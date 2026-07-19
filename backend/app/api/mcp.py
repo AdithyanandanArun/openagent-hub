@@ -1,32 +1,19 @@
+"""Remote MCP connector API for the hosted beta."""
+from typing import List
 from uuid import UUID
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
-from app.services.auth_service import get_current_user
-from app.services import mcp_service
-from app.services import mcp_catalog
 from app.core.config import settings
-from app.schemas.agent import MCPServerCreate, MCPServerUpdate, MCPServerResponse
+from app.core.database import get_db
+from app.schemas.agent import MCPServerCreate, MCPServerResponse, MCPServerUpdate
+from app.services import mcp_service
+from app.services.auth_service import get_current_user
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 security = HTTPBearer()
-
-
-class MCPInstallRequest(BaseModel):
-    source: str
-    name: Optional[str] = None
-    env: Optional[dict] = None
-    config: Optional[dict] = None
-    auto_approve: bool = True
-
-
-class MCPResolveRequest(BaseModel):
-    source: str
 
 
 def _current_user(
@@ -36,63 +23,47 @@ def _current_user(
     return get_current_user(db, credentials.credentials)
 
 
+def _require_remote_mcp_enabled() -> None:
+    if not settings.ENABLE_REMOTE_MCP_CONNECTORS:
+        raise HTTPException(status_code=403, detail="Remote MCP connectors are not enabled in this deployment")
+
+
 @router.get("/servers", response_model=List[MCPServerResponse])
 def list_servers(user=Depends(_current_user), db: Session = Depends(get_db)):
-    if not settings.ENABLE_CUSTOM_MCP_SERVERS:
+    if not settings.ENABLE_REMOTE_MCP_CONNECTORS:
         return []
-    # Seed the bundled example server on first access so MCP works out of the box.
-    mcp_service.ensure_example_server(db, user.id)
     return mcp_service.list_servers(db, user.id)
 
 
 @router.get("/catalog")
 def get_catalog(user=Depends(_current_user)):
-    """Curated list of popular MCP servers for one-click install."""
-    return mcp_catalog.get_catalog() if settings.ENABLE_CUSTOM_MCP_SERVERS else []
+    """Only owner-reviewed catalogue entries will be listed here.
 
-
-@router.post("/resolve")
-def resolve(body: MCPResolveRequest, user=Depends(_current_user)):
-    """Preview what a pasted source resolves to (command/args/required secrets)
-    without installing it."""
-    _require_custom_mcp_enabled()
-    return mcp_catalog.resolve_source(body.source)
-
-
-@router.post("/install", response_model=MCPServerResponse, status_code=201)
-def install(body: MCPInstallRequest, user=Depends(_current_user), db: Session = Depends(get_db)):
-    """Install an MCP server from a catalog id, GitHub URL, npm/PyPI package, or command."""
-    _require_custom_mcp_enabled()
-    return mcp_catalog.install_server(
-        db, user.id, body.source,
-        name=body.name, env=body.env, config=body.config, auto_approve=body.auto_approve,
-    )
+    The first remote release intentionally starts empty rather than preserving
+    the old catalogue of locally executable stdio packages.
+    """
+    return [] if settings.ENABLE_REMOTE_MCP_CONNECTORS else []
 
 
 @router.post("/servers", response_model=MCPServerResponse, status_code=201)
 def create_server(data: MCPServerCreate, user=Depends(_current_user), db: Session = Depends(get_db)):
-    _require_custom_mcp_enabled()
+    _require_remote_mcp_enabled()
     return mcp_service.create_server(db, user.id, data.model_dump())
 
 
 @router.patch("/servers/{server_id}", response_model=MCPServerResponse)
 def update_server(server_id: UUID, data: MCPServerUpdate, user=Depends(_current_user), db: Session = Depends(get_db)):
-    _require_custom_mcp_enabled()
-    return mcp_service.update_server(db, user.id, server_id, data.model_dump(exclude_none=True))
+    _require_remote_mcp_enabled()
+    return mcp_service.update_server(db, user.id, server_id, data.model_dump(exclude_unset=True))
 
 
 @router.delete("/servers/{server_id}", status_code=204)
 def delete_server(server_id: UUID, user=Depends(_current_user), db: Session = Depends(get_db)):
-    _require_custom_mcp_enabled()
+    _require_remote_mcp_enabled()
     mcp_service.delete_server(db, user.id, server_id)
 
 
 @router.post("/servers/{server_id}/sync", response_model=MCPServerResponse)
 async def sync_server(server_id: UUID, user=Depends(_current_user), db: Session = Depends(get_db)):
-    _require_custom_mcp_enabled()
+    _require_remote_mcp_enabled()
     return await mcp_service.sync_server(db, user.id, server_id)
-
-
-def _require_custom_mcp_enabled() -> None:
-    if not settings.ENABLE_CUSTOM_MCP_SERVERS:
-        raise HTTPException(status_code=403, detail="MCP server configuration is disabled in this deployment")

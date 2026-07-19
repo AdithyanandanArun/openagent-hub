@@ -13,7 +13,10 @@ process spawn per call — fine for the local, low-frequency tool calls agents m
 import asyncio
 import json
 import os
+import re
 from typing import Any
+
+import httpx
 
 PROTOCOL_VERSION = "2024-11-05"
 _CLIENT_INFO = {"name": "openagent-hub", "version": "0.1.0"}
@@ -236,4 +239,97 @@ async def mcp_call_tool(
     env: dict | None = None,
 ) -> str:
     async with MCPSession(command, args, env) as session:
+        return await session.call_tool(name, arguments)
+
+
+# --------------------------------------------------------------------------- #
+# Streamable HTTP client (hosted-safe MCP transport)                           #
+# --------------------------------------------------------------------------- #
+
+def _json_from_streamable_response(response: httpx.Response) -> dict:
+    content_type = response.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise MCPError("MCP server returned invalid JSON") from exc
+    # A Streamable HTTP server may respond with an SSE message containing one
+    # JSON-RPC response. We intentionally accept only the first data payload.
+    for line in response.text.splitlines():
+        if line.startswith("data:"):
+            try:
+                return json.loads(line[5:].strip())
+            except json.JSONDecodeError as exc:
+                raise MCPError("MCP server returned invalid event data") from exc
+    raise MCPError("MCP server returned no JSON-RPC response")
+
+
+class HTTPMCPSession:
+    """Short-lived Streamable HTTP session; never executes a local process."""
+
+    def __init__(self, url: str, headers: dict[str, str] | None = None):
+        self.url = url
+        self.headers = headers or {}
+        self._client: httpx.AsyncClient | None = None
+        self._id = 0
+
+    async def __aenter__(self) -> "HTTPMCPSession":
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0), follow_redirects=False)
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        if self._client:
+            await self._client.aclose()
+
+    async def request(self, method: str, params: dict | None = None) -> Any:
+        if not self._client:
+            raise MCPError("MCP session is not initialized")
+        self._id += 1
+        headers = {
+            "accept": "application/json, text/event-stream",
+            "content-type": "application/json",
+            "mcp-protocol-version": PROTOCOL_VERSION,
+            **self.headers,
+        }
+        try:
+            response = await self._client.post(self.url, headers=headers, json={
+                "jsonrpc": "2.0", "id": self._id, "method": method, "params": params or {},
+            })
+        except httpx.HTTPError as exc:
+            raise MCPError(f"Could not reach remote MCP server: {exc}") from exc
+        if response.status_code >= 400:
+            raise MCPError(f"Remote MCP server returned HTTP {response.status_code}")
+        session_id = response.headers.get("mcp-session-id")
+        if session_id:
+            self.headers["mcp-session-id"] = session_id
+        payload = _json_from_streamable_response(response)
+        if "error" in payload:
+            error = payload["error"]
+            raise MCPError(f"MCP error {error.get('code')}: {error.get('message')}")
+        return payload.get("result")
+
+    async def initialize(self) -> None:
+        await self.request("initialize", {
+            "protocolVersion": PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": _CLIENT_INFO,
+        })
+
+    async def list_tools(self) -> list[dict]:
+        result = await self.request("tools/list")
+        return (result or {}).get("tools", [])
+
+    async def call_tool(self, name: str, arguments: dict) -> str:
+        result = await self.request("tools/call", {"name": name, "arguments": arguments or {}})
+        return _flatten_tool_result(result or {})
+
+
+async def mcp_list_http_tools(url: str, headers: dict[str, str] | None = None) -> list[dict]:
+    async with HTTPMCPSession(url, headers) as session:
+        return await session.list_tools()
+
+
+async def mcp_call_http_tool(url: str, name: str, arguments: dict, headers: dict[str, str] | None = None) -> str:
+    async with HTTPMCPSession(url, headers) as session:
         return await session.call_tool(name, arguments)

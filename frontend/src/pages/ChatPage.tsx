@@ -8,6 +8,7 @@ import { ProviderSettingsDialog } from '../components/ProviderSettingsDialog';
 import { AgentsView } from '../components/AgentsView';
 import { AgentManagerDialog } from '../components/AgentManagerDialog';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { OnboardingChecklist } from '../components/OnboardingChecklist';
 import { useChat } from '../hooks/useChat';
 import { useProjects } from '../hooks/useProjects';
 import { useProviderSettings } from '../hooks/useProviderSettings';
@@ -19,6 +20,7 @@ import { useAgents } from '../hooks/useAgents';
 import { getRun, AgentRunDetail, AgentMode, Agent } from '../services/agents';
 import { User } from '../services/auth';
 import { ProviderConfig } from '../services/chat';
+import { getPreferences, updatePreferences, WorkspacePreferences } from '../services/preferences';
 
 interface Props {
   user: User;
@@ -90,11 +92,16 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingDeletion, setPendingDeletion] = useState<PendingDeletion | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [preferences, setPreferences] = useState<WorkspacePreferences | null>(null);
 
   useEffect(() => {
     loadConversations(selectedProjectId);
     loadProjects();
   }, [loadConversations, loadProjects, selectedProjectId]);
+
+  useEffect(() => {
+    getPreferences().then(setPreferences).catch(() => {});
+  }, []);
 
   // Default the Agents tab to the built-in Orchestrator so a run always has an agent.
   useEffect(() => {
@@ -172,6 +179,15 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
 
   const handleOpenSettings = () => {
     setShowSettings(true);
+  };
+
+  const dismissOnboarding = async () => {
+    try {
+      const updated = await updatePreferences({ complete_onboarding: true });
+      setPreferences(updated);
+    } catch {
+      // The checklist remains available after a transient network failure.
+    }
   };
 
   const confirmDeletion = async () => {
@@ -295,6 +311,15 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
 
         {view === 'chat' ? (
           <>
+            {preferences && !preferences.onboarding_completed_at && (
+              <OnboardingChecklist
+                hasProvider={resolvedProviderModels.length > 0 || Boolean(config?.model)}
+                hasProject={projects.length > 0}
+                hasEmbeddingProvider={Boolean(preferences.embedding_provider_id && preferences.embedding_model)}
+                onOpenSettings={handleOpenSettings}
+                onDismiss={dismissOnboarding}
+              />
+            )}
             <ChatWindow
               conversation={currentConversation}
               isStreaming={isStreaming}

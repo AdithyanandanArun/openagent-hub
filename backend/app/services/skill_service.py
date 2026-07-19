@@ -4,6 +4,7 @@ optional tool whitelist) that shapes how an agent run behaves. Built-in skills
 are seeded lazily per user on first access.
 """
 from uuid import UUID
+import re
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -210,6 +211,43 @@ def delete_skill(db: Session, user_id: UUID, skill_id: UUID) -> None:
         raise HTTPException(status_code=400, detail="Built-in skills cannot be deleted")
     db.delete(s)
     db.commit()
+
+
+def export_skill_markdown(skill: Skill) -> str:
+    """Produce a portable, data-only SKILL.md file."""
+    name = skill.name.replace('"', '\\"')
+    description = (skill.description or "").replace('"', '\\"')
+    return f'---\nname: "{name}"\ndescription: "{description}"\n---\n\n# {skill.name}\n\n{skill.instructions.strip()}\n'
+
+
+def import_skill_markdown(db: Session, user_id: UUID, content: str) -> Skill:
+    """Import instruction data only; uploaded content is never executed."""
+    if len(content.encode("utf-8")) > 256 * 1024:
+        raise HTTPException(status_code=400, detail="SKILL.md must be smaller than 256 KB")
+    text = content.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="SKILL.md cannot be empty")
+    name, description, body = "Imported skill", None, text
+    if text.startswith("---\n"):
+        match = re.match(r"^---\n(.*?)\n---\n?(.*)$", text, re.DOTALL)
+        if not match:
+            raise HTTPException(status_code=400, detail="SKILL.md frontmatter is not valid")
+        frontmatter, body = match.groups()
+        fields = {}
+        for line in frontmatter.splitlines():
+            if ":" in line:
+                key, value = line.split(":", 1)
+                fields[key.strip().lower()] = value.strip().strip('"').strip("'")
+        name = fields.get("name") or name
+        description = fields.get("description") or None
+    heading = re.search(r"^#\s+(.+?)\s*$", body, re.MULTILINE)
+    if heading:
+        if name == "Imported skill":
+            name = heading.group(1)
+        body = (body[:heading.start()] + body[heading.end():]).strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="SKILL.md needs instructions below its title")
+    return create_skill(db, user_id, {"name": name[:120], "description": description, "instructions": body})
 
 
 def build_auto_skill_prompt(db: Session, user_id: UUID) -> str | None:

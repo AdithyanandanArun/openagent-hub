@@ -1,0 +1,37 @@
+# Rendered by the beta deployment workflow. This job is invoked on demand for
+# one queued source, so it has no minimum running instances or idle cost.
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: openagent-beta-knowledge-worker
+spec:
+  template:
+    spec:
+      template:
+        spec:
+          serviceAccountName: $BETA_RUNTIME_SERVICE_ACCOUNT
+          maxRetries: 2
+          timeoutSeconds: 900
+          containers:
+            - image: $BACKEND_IMAGE
+              command: ["python", "-m", "app.knowledge_worker"]
+              resources:
+                limits: { cpu: "1", memory: 1Gi }
+              env:
+                - name: ENVIRONMENT
+                  value: production
+                - name: STORAGE_BACKEND
+                  value: gcs
+                - name: GCS_BUCKET
+                  value: $BETA_GCS_BUCKET
+                - name: GOOGLE_CLOUD_PROJECT
+                  value: $BETA_GCP_PROJECT_ID
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: { name: $BETA_DATABASE_URL_SECRET, key: latest }
+                - name: SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: $BETA_SECRET_KEY_SECRET, key: latest }
+                - name: ENCRYPTION_KEY
+                  valueFrom:
+                    secretKeyRef: { name: $BETA_ENCRYPTION_KEY_SECRET, key: latest }

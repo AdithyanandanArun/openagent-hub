@@ -1,75 +1,44 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  listMCPServers, createMCPServer, updateMCPServer, deleteMCPServer, syncMCPServer,
-  getCatalog, installServer, MCPServer, CatalogEntry,
+  createMCPServer, deleteMCPServer, listMCPServers, MCPServer, MCPServerInput, syncMCPServer, updateMCPServer,
 } from '../services/mcp';
 
 export function useMCP() {
   const [servers, setServers] = useState<MCPServer[]>([]);
-  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [syncingId, setSyncingId] = useState<string | null>(null);
-  const [installing, setInstalling] = useState(false);
 
   const load = useCallback(async () => {
-    try { setServers(await listMCPServers()); } catch { /* ignore */ }
+    try { setServers(await listMCPServers()); } catch { /* unavailable until deployment enables remote MCP */ }
   }, []);
 
-  const loadCatalog = useCallback(async () => {
-    try { setCatalog(await getCatalog()); } catch { /* ignore */ }
+  const add = useCallback(async (payload: MCPServerInput) => {
+    const server = await createMCPServer(payload);
+    setServers((current) => [...current, server]);
+    return server;
   }, []);
 
-  const add = useCallback(async (payload: { name: string; command: string; args?: string[] }) => {
-    const s = await createMCPServer(payload);
-    setServers((p) => [...p, s]);
-    return s;
-  }, []);
-
-  const edit = useCallback(async (id: string, payload: Partial<MCPServer>) => {
-    const s = await updateMCPServer(id, payload);
-    setServers((p) => p.map((x) => (x.id === id ? s : x)));
+  const edit = useCallback(async (id: string, payload: Parameters<typeof updateMCPServer>[1]) => {
+    const server = await updateMCPServer(id, payload);
+    setServers((current) => current.map((item) => item.id === id ? server : item));
+    return server;
   }, []);
 
   const remove = useCallback(async (id: string) => {
     await deleteMCPServer(id);
-    setServers((p) => p.filter((x) => x.id !== id));
+    setServers((current) => current.filter((item) => item.id !== id));
   }, []);
 
   const sync = useCallback(async (id: string) => {
     setSyncingId(id);
     try {
-      const s = await syncMCPServer(id);
-      setServers((p) => p.map((x) => (x.id === id ? s : x)));
-      return s;
+      const server = await syncMCPServer(id);
+      setServers((current) => current.map((item) => item.id === id ? server : item));
+      return server;
     } finally {
       setSyncingId(null);
     }
   }, []);
 
-  const install = useCallback(async (payload: {
-    source: string;
-    name?: string;
-    env?: Record<string, string>;
-    config?: Record<string, string>;
-    auto_approve?: boolean;
-  }) => {
-    setInstalling(true);
-    try {
-      const s = await installServer(payload);
-      setServers((p) => [...p, s]);
-      // Auto-sync so tools populate right away.
-      try {
-        const synced = await syncMCPServer(s.id);
-        setServers((p) => p.map((x) => (x.id === s.id ? synced : x)));
-        return synced;
-      } catch {
-        return s;
-      }
-    } finally {
-      setInstalling(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); loadCatalog(); }, [load, loadCatalog]);
-
-  return { servers, catalog, syncingId, installing, load, loadCatalog, add, edit, remove, sync, install };
+  useEffect(() => { load(); }, [load]);
+  return { servers, syncingId, add, edit, remove, sync };
 }

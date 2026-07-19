@@ -71,7 +71,7 @@ jobs:
           FRONTEND_IMAGE: ${{ steps.images.outputs.frontend }}
         run: |
           mkdir -p /tmp/openagent-beta
-          for manifest in service.yaml migrate-job.yaml health-job.yaml; do
+          for manifest in service.yaml migrate-job.yaml health-job.yaml knowledge-worker-job.yaml; do
             envsubst < "deployment/cloud-run-beta/$manifest" > "/tmp/openagent-beta/$manifest"
           done
           if grep -RE "\$BETA_|\$BACKEND_IMAGE|\$FRONTEND_IMAGE" /tmp/openagent-beta; then
@@ -88,3 +88,4 @@ jobs:
           gcloud run services replace /tmp/openagent-beta/service.yaml --region "$BETA_GCP_REGION"
           gcloud run services add-iam-policy-binding openagent-beta --region "$BETA_GCP_REGION" --member="allUsers" --role="roles/run.invoker"
           gcloud run jobs replace /tmp/openagent-beta/health-job.yaml --region "$BETA_GCP_REGION"
+          gcloud run jobs replace /tmp/openagent-beta/knowledge-worker-job.yaml --region "$BETA_GCP_REGION"

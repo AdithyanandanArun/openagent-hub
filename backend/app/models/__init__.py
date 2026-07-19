@@ -15,3 +15,7 @@ from app.models.mcp_server import MCPServer
 from app.models.api_token import ApiToken
 from app.models.provider_key import ProviderKey
 from app.models.request_log import RequestLog
+from app.models.user_preference import UserPreference
+from app.models.feedback import Feedback
+from app.models.knowledge_source import KnowledgeSource
+from app.models.knowledge_chunk import KnowledgeChunk

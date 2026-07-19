@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   X, RefreshCw, Save, Sun, Moon, LogOut, User as UserIcon, Cpu, Settings2,
   Plus, Trash2, Zap, CheckCircle, AlertCircle, Circle, ChevronUp, ChevronDown, Eye, EyeOff,
-  Brain, Sparkles, Terminal, KeyRound, BarChart3, Shield,
+  Brain, Sparkles, Terminal, KeyRound, BarChart3, Shield, MessageCircle,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { ProviderConfig } from '../services/chat';
@@ -18,6 +18,8 @@ import { MCPTab } from './settings/MCPTab';
 import { TokensTab } from './settings/TokensTab';
 import { DashboardTab } from './settings/DashboardTab';
 import { SystemTab } from './settings/SystemTab';
+import { KnowledgeTab } from './settings/KnowledgeTab';
+import { FeedbackTab } from './settings/FeedbackTab';
 
 interface Props {
   config: ProviderConfig | null;
@@ -31,11 +33,12 @@ interface Props {
   onProvidersChange?: () => void;
 }
 
-type Tab = 'general' | 'providers' | 'tokens' | 'dashboard' | 'system' | 'memory' | 'skills' | 'mcp' | 'api' | 'account';
+type Tab = 'general' | 'providers' | 'knowledge' | 'tokens' | 'dashboard' | 'system' | 'memory' | 'skills' | 'mcp' | 'api' | 'feedback' | 'account';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'general', label: 'General', icon: <Settings2 size={15} /> },
   { id: 'providers', label: 'Providers', icon: <Cpu size={15} /> },
+  { id: 'knowledge', label: 'Knowledge', icon: <Brain size={15} /> },
   { id: 'tokens', label: 'API Tokens', icon: <KeyRound size={15} /> },
   { id: 'dashboard', label: 'Dashboard', icon: <BarChart3 size={15} /> },
   { id: 'system', label: 'System', icon: <Shield size={15} /> },
@@ -43,6 +46,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'skills', label: 'Skills', icon: <Sparkles size={15} /> },
   { id: 'mcp', label: 'MCP', icon: <Terminal size={15} /> },
   { id: 'api', label: 'Single API', icon: <Zap size={15} /> },
+  { id: 'feedback', label: 'Feedback', icon: <MessageCircle size={15} /> },
   { id: 'account', label: 'Account', icon: <UserIcon size={15} /> },
 ];
 
@@ -571,6 +575,7 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
           <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-7 sm:py-6">
             {activeTab === 'general' && <GeneralTab />}
             {activeTab === 'providers' && <ProvidersTab onProvidersChange={onProvidersChange} />}
+            {activeTab === 'knowledge' && <KnowledgeTab />}
             {activeTab === 'tokens' && <TokensTab />}
             {activeTab === 'dashboard' && <DashboardTab />}
             {activeTab === 'system' && <SystemTab />}
@@ -578,6 +583,7 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
             {activeTab === 'skills' && <SkillsTab />}
             {activeTab === 'mcp' && <MCPTab />}
             {activeTab === 'api' && <ApiTab config={config} onSave={onSave} onFetchModels={onFetchModels} />}
+            {activeTab === 'feedback' && <FeedbackTab />}
             {activeTab === 'account' && <AccountTab username={username} email={email} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />}
           </div>
         </div>

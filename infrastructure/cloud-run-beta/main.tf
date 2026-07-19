@@ -120,6 +120,14 @@ resource "google_project_iam_member" "github_deployer" {
   member  = "serviceAccount:${google_service_account.github_deployer.email}"
 }
 
+# The public service may start an on-demand knowledge indexing Job, but it
+# cannot deploy or modify Cloud Run resources.
+resource "google_project_iam_member" "runtime_job_invoker" {
+  project = var.project_id
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${google_service_account.runtime.email}"
+}
+
 resource "google_service_account_iam_member" "github_runtime_user" {
   service_account_id = google_service_account.runtime.name
   role               = "roles/iam.serviceAccountUser"

@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     PUBLIC_APP_URL: str = "http://localhost:3000"
     ENABLE_OPENAI_COMPAT_API: bool = True
     ENABLE_CUSTOM_MCP_SERVERS: bool = True
+    # Remote Streamable HTTP MCP connectors are safe to expose in the hosted
+    # beta. This intentionally does not enable stdio/local command execution.
+    ENABLE_REMOTE_MCP_CONNECTORS: bool = False
     ENABLE_WORKSPACE_OPEN: bool = True
     STORAGE_BACKEND: str = "local"  # local | gcs
     GCS_BUCKET: Optional[str] = None
