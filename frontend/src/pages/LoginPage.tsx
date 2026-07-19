@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Bot } from 'lucide-react';
 import clsx from 'clsx';
-import { resendVerification, verifyEmail } from '../services/auth';
+import { requestPasswordReset, resetPassword, verifyEmail } from '../services/auth';
 
 interface Props {
   onLogin: (email: string, password: string) => Promise<void>;
@@ -9,7 +9,7 @@ interface Props {
 }
 
 export function LoginPage({ onLogin, onRegister }: Props) {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -18,7 +18,13 @@ export function LoginPage({ onLogin, onRegister }: Props) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const token = new URLSearchParams(window.location.search).get('verify_token');
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('verify_token');
+    const resetToken = params.get('reset_token');
+    if (resetToken) {
+      setMode('reset');
+      return;
+    }
     if (!token) return;
     setLoading(true);
     verifyEmail(token)
@@ -39,10 +45,17 @@ export function LoginPage({ onLogin, onRegister }: Props) {
     try {
       if (mode === 'login') {
         await onLogin(email, password);
-      } else {
-        setNotice(await onRegister(email, username, password));
+      } else if (mode === 'forgot') {
+        setNotice(await requestPasswordReset(email));
+      } else if (mode === 'reset') {
+        const token = new URLSearchParams(window.location.search).get('reset_token');
+        if (!token) throw new Error('This password-reset link is invalid.');
+        setNotice(await resetPassword(token, password));
         setMode('login');
         setPassword('');
+        window.history.replaceState({}, '', window.location.pathname);
+      } else {
+        await onRegister(email, username, password);
       }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } }; message?: string })
@@ -83,14 +96,16 @@ export function LoginPage({ onLogin, onRegister }: Props) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className={inputClass}
-          />
+          {mode !== 'reset' && (
+            <input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className={inputClass}
+            />
+          )}
           {mode === 'register' && (
             <input
               type="text"
@@ -102,15 +117,17 @@ export function LoginPage({ onLogin, onRegister }: Props) {
               className={inputClass}
             />
           )}
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={6}
-            className={inputClass}
-          />
+          {mode !== 'forgot' && (
+            <input
+              type="password"
+              placeholder={mode === 'reset' ? 'New password (8+ characters)' : 'Password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={mode === 'reset' ? 8 : 6}
+              className={inputClass}
+            />
+          )}
 
           {error && <p className="text-red-400 text-sm">{error}</p>}
           {notice && <p className="text-emerald-400 text-sm">{notice}</p>}
@@ -120,22 +137,22 @@ export function LoginPage({ onLogin, onRegister }: Props) {
             disabled={loading}
             className="w-full bg-white text-black py-3 rounded-xl text-sm font-semibold hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
+            {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : mode === 'register' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : 'Set new password'}
           </button>
         </form>
         {mode === 'login' && (
           <button
             type="button"
-            onClick={async () => {
-              if (!email) { setError('Enter your email address first.'); return; }
-              setLoading(true); setError('');
-              try { setNotice(await resendVerification(email)); } catch { setError('Unable to resend verification email.'); }
-              finally { setLoading(false); }
-            }}
-            disabled={loading}
+            onClick={() => { setMode('forgot'); setError(''); setNotice(''); }}
             className="w-full mt-3 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
           >
-            Resend verification email
+            Forgot password?
+          </button>
+        )}
+        {(mode === 'forgot' || mode === 'reset') && (
+          <button type="button" onClick={() => { setMode('login'); setError(''); setNotice(''); }}
+            className="w-full mt-3 text-xs text-zinc-500 hover:text-zinc-300">
+            Back to sign in
           </button>
         )}
       </div>

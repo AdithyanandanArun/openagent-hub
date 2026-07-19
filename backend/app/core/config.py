@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # Comma-separated normalized email addresses. Store this in a secret
     # manager in public beta deployments so the invited-user list is private.
     INVITED_EMAILS: str = ""
+    # A comma-separated allowlist for the small beta's account-control UI.
+    # Keeping this outside the database means an operator can revoke admin
+    # access in deployment configuration without trusting an in-app role edit.
+    ADMIN_EMAILS: str = ""
     # AES-256-GCM key for encrypting provider API keys at rest. 32 bytes,
     # base64-encoded. If unset, derived deterministically from SECRET_KEY via
     # HKDF so existing single-secret deploys keep working.
@@ -59,6 +63,10 @@ class Settings(BaseSettings):
     @property
     def invited_emails(self) -> set[str]:
         return {email.strip().lower() for email in self.INVITED_EMAILS.split(",") if email.strip()}
+
+    @property
+    def admin_emails(self) -> set[str]:
+        return {email.strip().lower() for email in self.ADMIN_EMAILS.split(",") if email.strip()}
 
     def validate_runtime(self) -> None:
         """Fail closed when a public deployment is missing required controls."""

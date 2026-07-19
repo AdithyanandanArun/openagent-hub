@@ -14,6 +14,7 @@ from app.core.config import settings
 
 
 VERIFICATION_TOKEN_TTL = timedelta(hours=24)
+PASSWORD_RESET_TOKEN_TTL = timedelta(hours=1)
 
 
 def _token_hash(token: str) -> str:
@@ -25,6 +26,15 @@ def create_verification_token(db: Session, user: User) -> str:
     token = secrets.token_urlsafe(32)
     user.email_verification_token_hash = _token_hash(token)
     user.email_verification_expires_at = datetime.utcnow() + VERIFICATION_TOKEN_TTL
+    db.commit()
+    return token
+
+
+def create_password_reset_token(db: Session, user: User) -> str:
+    """Replace an old reset token and return the plaintext exactly once."""
+    token = secrets.token_urlsafe(32)
+    user.password_reset_token_hash = _token_hash(token)
+    user.password_reset_expires_at = datetime.utcnow() + PASSWORD_RESET_TOKEN_TTL
     db.commit()
     return token
 
@@ -94,6 +104,27 @@ def resend_verification(db: Session, email: str) -> tuple[User | None, str | Non
     if not user or user.email_verified_at:
         return None, None
     return user, create_verification_token(db, user)
+
+
+def request_password_reset(db: Session, email: str) -> tuple[User | None, str | None]:
+    """Create a reset token only for active accounts without exposing membership."""
+    user = db.query(User).filter(User.email == email.strip().lower()).first()
+    if not user or not user.is_active:
+        return None, None
+    return user, create_password_reset_token(db, user)
+
+
+def reset_password(db: Session, token: str, password: str) -> None:
+    token_hash = _token_hash((token or "").strip())
+    user = db.query(User).filter(User.password_reset_token_hash == token_hash).first()
+    if not user or not user.password_reset_expires_at or user.password_reset_expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="This password-reset link is invalid or has expired")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is disabled")
+    user.hashed_password = hash_password(password)
+    user.password_reset_token_hash = None
+    user.password_reset_expires_at = None
+    db.commit()
 
 
 def delete_account(db: Session, user: User, password: str) -> None:

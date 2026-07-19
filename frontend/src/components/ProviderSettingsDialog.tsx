@@ -20,6 +20,8 @@ import { DashboardTab } from './settings/DashboardTab';
 import { SystemTab } from './settings/SystemTab';
 import { KnowledgeTab } from './settings/KnowledgeTab';
 import { FeedbackTab } from './settings/FeedbackTab';
+import { UsageTab } from './settings/UsageTab';
+import { AdminTab } from './settings/AdminTab';
 
 interface Props {
   config: ProviderConfig | null;
@@ -31,9 +33,10 @@ interface Props {
   onLogout?: () => void;
   onDeleteAccount?: (password: string) => Promise<void>;
   onProvidersChange?: () => void;
+  isAdmin?: boolean;
 }
 
-type Tab = 'general' | 'providers' | 'knowledge' | 'tokens' | 'dashboard' | 'system' | 'memory' | 'skills' | 'mcp' | 'api' | 'feedback' | 'account';
+type Tab = 'general' | 'providers' | 'knowledge' | 'tokens' | 'dashboard' | 'system' | 'memory' | 'skills' | 'mcp' | 'api' | 'feedback' | 'usage' | 'account' | 'admin';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'general', label: 'General', icon: <Settings2 size={15} /> },
@@ -47,6 +50,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'mcp', label: 'MCP', icon: <Terminal size={15} /> },
   { id: 'api', label: 'Single API', icon: <Zap size={15} /> },
   { id: 'feedback', label: 'Feedback', icon: <MessageCircle size={15} /> },
+  { id: 'usage', label: 'Usage', icon: <BarChart3 size={15} /> },
   { id: 'account', label: 'Account', icon: <UserIcon size={15} /> },
 ];
 
@@ -541,8 +545,9 @@ function AccountTab({ username, email, onLogout, onDeleteAccount }: {
 
 // ── Root dialog ────────────────────────────────────────────────────────────────
 
-export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose, username, email, onLogout, onDeleteAccount, onProvidersChange }: Props) {
+export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose, username, email, onLogout, onDeleteAccount, onProvidersChange, isAdmin }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('providers');
+  const tabs = isAdmin ? [...TABS, { id: 'admin' as const, label: 'Admin', icon: <Shield size={15} /> }] : TABS;
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 sm:p-4" onClick={onClose}>
@@ -554,7 +559,7 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
         <div className="w-full sm:w-56 bg-zinc-950/60 border-b sm:border-b-0 sm:border-r border-zinc-800 flex flex-col p-2 sm:p-3 flex-shrink-0">
           <p className="hidden sm:block text-xs font-semibold text-zinc-500 uppercase tracking-widest px-2 py-2 mb-1">Settings</p>
           <nav className="flex flex-row sm:flex-col gap-0.5 flex-1 overflow-x-auto sm:overflow-visible">
-            {TABS.map((tab) => (
+            {tabs.map((tab) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                 className={clsx(
                   'flex flex-shrink-0 items-center gap-2 sm:gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-colors sm:w-full',
@@ -569,7 +574,7 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
         {/* Content */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 border-b border-zinc-800">
-            <h2 className="text-sm font-semibold text-white">{TABS.find((t) => t.id === activeTab)?.label}</h2>
+            <h2 className="text-sm font-semibold text-white">{tabs.find((t) => t.id === activeTab)?.label}</h2>
             <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 transition-colors"><X size={15} /></button>
           </div>
           <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-7 sm:py-6">
@@ -584,7 +589,9 @@ export function ProviderSettingsDialog({ config, onSave, onFetchModels, onClose,
             {activeTab === 'mcp' && <MCPTab />}
             {activeTab === 'api' && <ApiTab config={config} onSave={onSave} onFetchModels={onFetchModels} />}
             {activeTab === 'feedback' && <FeedbackTab />}
+            {activeTab === 'usage' && <UsageTab />}
             {activeTab === 'account' && <AccountTab username={username} email={email} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />}
+            {activeTab === 'admin' && isAdmin && <AdminTab />}
           </div>
         </div>
       </div>

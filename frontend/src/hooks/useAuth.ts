@@ -22,7 +22,13 @@ export function useAuth() {
   }, []);
 
   const register = useCallback(async (email: string, username: string, password: string) => {
-    return apiRegister(email, username, password);
+    const message = await apiRegister(email, username, password);
+    // The public beta intentionally has no invite or verification gate. Log a
+    // new user in immediately so signup is a single, frictionless action.
+    const token = await apiLogin(email, password);
+    localStorage.setItem('token', token);
+    setUser(await getMe());
+    return message;
   }, []);
 
   const logout = useCallback(() => {

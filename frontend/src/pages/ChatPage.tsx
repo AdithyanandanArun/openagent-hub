@@ -400,6 +400,7 @@ export function ChatPage({ user, onLogout, onDeleteAccount }: Props) {
           onLogout={onLogout}
           onDeleteAccount={onDeleteAccount}
           onProvidersChange={handleProvidersChange}
+          isAdmin={user.is_admin}
         />
       )}
 

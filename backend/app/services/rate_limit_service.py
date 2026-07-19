@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 import logging
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -73,6 +74,39 @@ def check_chat_request(user_id: UUID) -> None:
         60,
         "Too many chat requests. Try again shortly.",
     )
+
+
+def chat_usage(user_id: UUID) -> dict[str, int | datetime | None]:
+    """Return the current shared Redis counters for a user's settings page."""
+    client = _client()
+    if client is None:
+        return {
+            "chat_requests_this_minute": 0,
+            "chat_requests_today": 0,
+            "minute_reset_at": None,
+            "day_reset_at": None,
+        }
+    minute_key = f"oah:chat:minute:{user_id}"
+    day_key = f"oah:chat:day:{user_id}"
+    try:
+        minute_used, day_used, minute_ttl, day_ttl = client.pipeline().get(minute_key).get(day_key).ttl(minute_key).ttl(day_key).execute()
+        now = datetime.utcnow()
+        return {
+            "chat_requests_this_minute": int(minute_used or 0),
+            "chat_requests_today": int(day_used or 0),
+            "minute_reset_at": now + timedelta(seconds=int(minute_ttl)) if int(minute_ttl) > 0 else None,
+            "day_reset_at": now + timedelta(seconds=int(day_ttl)) if int(day_ttl) > 0 else None,
+        }
+    except Exception as exc:  # noqa: BLE001
+        if settings.is_production:
+            raise HTTPException(status_code=503, detail="Rate limit service is unavailable") from exc
+        log.warning("Skipping development usage lookup: %s", exc)
+        return {
+            "chat_requests_this_minute": 0,
+            "chat_requests_today": 0,
+            "minute_reset_at": None,
+            "day_reset_at": None,
+        }
     _consume(
         f"oah:chat:day:{user_id}",
         settings.CHAT_REQUESTS_PER_DAY,

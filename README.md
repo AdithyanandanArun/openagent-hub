@@ -388,19 +388,23 @@ later scale-up without a database or attachment migration.
 2. Add versions to the four Secret Manager secret IDs from
    `terraform output secret_ids`: `DATABASE_URL` (Supabase with
    `sslmode=require`), `SECRET_KEY`, base64 32-byte `ENCRYPTION_KEY`,
-   and `REDIS_URL`. For Redis, create an Upstash Free database and store its
-   TLS connection URL (`rediss://...`) as the entire `REDIS_URL` secret. The
-   beta uses open registration and does not require the Resend email
-   verification path or an invited-user list. Do not put any of these values in
-   Terraform, GitHub variables, or this repository.
+   `REDIS_URL`, and `RESEND_API_KEY`. For Redis, create an Upstash Free
+   database and store its TLS connection URL (`rediss://...`) as the entire
+   `REDIS_URL` secret. The beta uses open registration with no verification or
+   invite gate, while Resend is used only for password recovery. Do not put any
+   of these values in Terraform, GitHub variables, or this repository.
 
 3. Create a `beta` GitHub Environment and add these variables from Terraform:
    `BETA_GCP_PROJECT_ID`, `BETA_GCP_REGION`, `BETA_ARTIFACT_REPOSITORY`,
    `BETA_RUNTIME_SERVICE_ACCOUNT`, `BETA_GCS_BUCKET`,
    `BETA_WORKLOAD_IDENTITY_PROVIDER`, and `BETA_DEPLOYER_SERVICE_ACCOUNT`.
-   Also add `BETA_PUBLIC_APP_URL` (an HTTPS beta domain) and the four Secret
+   Also add `BETA_PUBLIC_APP_URL` (an HTTPS beta domain), `BETA_EMAIL_FROM`
+   (a Resend-verified sender), and the five Secret
    Manager IDs as `BETA_DATABASE_URL_SECRET`, `BETA_SECRET_KEY_SECRET`,
-   `BETA_ENCRYPTION_KEY_SECRET`, and `BETA_REDIS_URL_SECRET`.
+   `BETA_ENCRYPTION_KEY_SECRET`, `BETA_REDIS_URL_SECRET`, and
+   `BETA_RESEND_API_KEY_SECRET`. Optionally set `BETA_ADMIN_EMAILS` to a
+   comma-separated list of account emails allowed to use the beta account
+   control tab.
 
 4. Point the beta hostname at Cloud Run using your DNS provider's Cloud Run
    custom-domain instructions, then run the **Deploy beta** workflow or push a

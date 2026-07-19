@@ -17,6 +17,8 @@ class User(Base):
     email_verified_at = Column(DateTime, nullable=True)
     email_verification_token_hash = Column(String, nullable=True, index=True)
     email_verification_expires_at = Column(DateTime, nullable=True)
+    password_reset_token_hash = Column(String, nullable=True, index=True)
+    password_reset_expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -25,3 +27,10 @@ class User(Base):
     providers = relationship("Provider", back_populates="user", cascade="all, delete-orphan")
     projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
     api_tokens = relationship("ApiToken", back_populates="user", cascade="all, delete-orphan")
+
+    @property
+    def is_admin(self) -> bool:
+        # Import lazily to avoid coupling SQLAlchemy model import order to the
+        # application settings module.
+        from app.core.config import settings
+        return self.email.strip().lower() in settings.admin_emails
