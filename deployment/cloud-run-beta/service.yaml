@@ -80,9 +80,9 @@ spec:
             - name: AUTH_REQUESTS_PER_HOUR
               value: "20"
             - name: CHAT_REQUESTS_PER_MINUTE
-              value: "20"
+              value: "60"
             - name: CHAT_REQUESTS_PER_DAY
-              value: "500"
+              value: "0"
             - name: MAX_CONCURRENT_CHAT_REQUESTS
               value: "2"
             - name: ENABLE_HEALTH_PROBES

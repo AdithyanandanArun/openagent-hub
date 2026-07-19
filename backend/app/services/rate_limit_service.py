@@ -93,9 +93,9 @@ def chat_usage(user_id: UUID) -> dict[str, int | datetime | None]:
         now = datetime.utcnow()
         return {
             "chat_requests_this_minute": int(minute_used or 0),
-            "chat_requests_today": int(day_used or 0),
+            "chat_requests_today": int(day_used or 0) if settings.CHAT_REQUESTS_PER_DAY > 0 else 0,
             "minute_reset_at": now + timedelta(seconds=int(minute_ttl)) if int(minute_ttl) > 0 else None,
-            "day_reset_at": now + timedelta(seconds=int(day_ttl)) if int(day_ttl) > 0 else None,
+            "day_reset_at": now + timedelta(seconds=int(day_ttl)) if settings.CHAT_REQUESTS_PER_DAY > 0 and int(day_ttl) > 0 else None,
         }
     except Exception as exc:  # noqa: BLE001
         if settings.is_production:

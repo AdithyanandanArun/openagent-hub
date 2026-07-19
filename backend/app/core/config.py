@@ -24,8 +24,10 @@ class Settings(BaseSettings):
     KNOWLEDGE_WORKER_JOB: str = "openagent-beta-knowledge-worker"
     REDIS_URL: Optional[str] = None
     AUTH_REQUESTS_PER_HOUR: int = 20
-    CHAT_REQUESTS_PER_MINUTE: int = 20
-    CHAT_REQUESTS_PER_DAY: int = 500
+    # BYOK users are not capped daily. The minute guard only protects the
+    # shared beta infrastructure from loops and accidental request storms.
+    CHAT_REQUESTS_PER_MINUTE: int = 60
+    CHAT_REQUESTS_PER_DAY: int = 0  # 0 disables the daily limit
     MAX_CONCURRENT_CHAT_REQUESTS: int = 2
     ENABLE_HEALTH_PROBES: bool = True
 

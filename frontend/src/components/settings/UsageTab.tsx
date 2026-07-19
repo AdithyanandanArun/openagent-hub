@@ -48,7 +48,14 @@ export function UsageTab() {
       {error && <p className="rounded-lg border border-red-900/70 bg-red-950/30 p-3 text-xs text-red-300">{error}</p>}
       {usage && <div className="space-y-3">
         <Meter label="Messages this minute" used={usage.chat_requests_this_minute} limit={usage.chat_requests_per_minute_limit} resetAt={usage.minute_reset_at} />
-        <Meter label="Messages today" used={usage.chat_requests_today} limit={usage.chat_requests_per_day_limit} resetAt={usage.day_reset_at} />
+        {usage.chat_requests_per_day_limit > 0 ? (
+          <Meter label="Messages today" used={usage.chat_requests_today} limit={usage.chat_requests_per_day_limit} resetAt={usage.day_reset_at} />
+        ) : (
+          <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/20 p-4">
+            <p className="text-sm font-medium text-emerald-200">No daily message limit</p>
+            <p className="mt-1 text-xs text-zinc-400">Use your own provider keys freely. The per-minute guard only protects the shared beta from accidental loops.</p>
+          </div>
+        )}
       </div>}
       {!usage && loading && <p className="text-sm text-zinc-500">Loading your usage…</p>}
     </div>
