@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { Send, Square, Paperclip, X, FileText, Image, ChevronDown, Eye, Brain, Zap, Bot, Target, ClipboardList, Eraser } from 'lucide-react';
 import clsx from 'clsx';
 import { uploadAttachment, AttachmentMeta } from '../services/attachments';
+import { addAttachmentToKnowledge } from '../services/knowledge';
 import { ProviderModel } from '../hooks/useProviders';
 import { CatalogModel } from '../services/catalog';
 import { Skill } from '../services/skills';
@@ -29,12 +30,13 @@ interface Props {
   onClearChat?: () => void;
 }
 
-function FileChip({ att, onRemove }: { att: AttachmentMeta; onRemove: () => void }) {
+function FileChip({ att, onRemove, onIndex, indexing, indexed }: { att: AttachmentMeta; onRemove: () => void; onIndex: () => void; indexing: boolean; indexed: boolean }) {
   const isImage = att.content_type.startsWith('image/');
   return (
     <div className="flex items-center gap-1.5 bg-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 max-w-[160px]">
       {isImage ? <Image size={12} className="flex-shrink-0 text-blue-400" /> : <FileText size={12} className="flex-shrink-0 text-zinc-400" />}
       <span className="truncate">{att.filename}</span>
+      <button onClick={onIndex} disabled={indexing || indexed} title={indexed ? 'Added to knowledge' : 'Add to knowledge'} className="flex-shrink-0 text-violet-400 hover:text-violet-200 disabled:opacity-50"><Brain size={11} className={indexing ? 'animate-pulse' : ''} /></button>
       <button onClick={onRemove} className="flex-shrink-0 text-zinc-500 hover:text-zinc-300 ml-0.5">
         <X size={11} />
       </button>
@@ -174,6 +176,8 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [knowledgeIds, setKnowledgeIds] = useState<string[]>([]);
+  const [indexingId, setIndexingId] = useState<string | null>(null);
   const [toolMode, setToolMode] = useState<ToolMode>('off');
   // Empty = all tools available; non-empty restricts to the selected tools.
   const [toolNames, setToolNames] = useState<string[]>([]);
@@ -275,6 +279,11 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
   };
 
   const canSend = !isStreaming && !disabled && !uploading && (value.trim().length > 0 || attachments.length > 0);
+  const addToKnowledge = async (attachmentId: string) => {
+    setIndexingId(attachmentId);
+    try { await addAttachmentToKnowledge(attachmentId); setKnowledgeIds((ids) => [...ids, attachmentId]); } catch { /* upload remains usable in chat */ }
+    finally { setIndexingId(null); }
+  };
 
   return (
     <div className="px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-1 sm:px-4 sm:pb-4 max-w-5xl mx-auto w-full">
@@ -284,6 +293,9 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, model, availa
             <FileChip
               key={att.id}
               att={att}
+              onIndex={() => addToKnowledge(att.id)}
+              indexing={indexingId === att.id}
+              indexed={knowledgeIds.includes(att.id)}
               onRemove={() => setAttachments((prev) => prev.filter((a) => a.id !== att.id))}
             />
           ))}
