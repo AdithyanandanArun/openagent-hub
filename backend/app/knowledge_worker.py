@@ -1,11 +1,14 @@
 """Cloud Run Job entrypoint for private knowledge indexing."""
 import os
+import asyncio
 from uuid import UUID
 
 from app.core.database import SessionLocal
 from app.models.knowledge_chunk import KnowledgeChunk
 from app.models.knowledge_source import KnowledgeSource
+from app.models.user_preference import UserPreference
 from app.services.knowledge_service import chunk_text, extract_source_text
+from app.services.openai_proxy import embeddings
 
 
 def main() -> None:
@@ -19,9 +22,20 @@ def main() -> None:
         try:
             text = extract_source_text(db, source)
             chunks = chunk_text(text)
+            preference = db.get(UserPreference, source.user_id)
+            if not preference or not preference.embedding_provider_id or not preference.embedding_model:
+                raise RuntimeError("Choose an embedding provider and model in Settings → Knowledge before indexing")
+            response = asyncio.run(embeddings(
+                db, source.user_id,
+                {"model": preference.embedding_model, "input": chunks},
+                preferred_provider_id=str(preference.embedding_provider_id),
+            ))
+            vectors = [item.get("embedding") for item in response.get("data", [])]
+            if len(vectors) != len(chunks) or any(not isinstance(vector, list) for vector in vectors):
+                raise RuntimeError("Embedding provider returned an invalid vector response")
             db.query(KnowledgeChunk).filter(KnowledgeChunk.source_id == source.id).delete()
-            for ordinal, content in enumerate(chunks):
-                db.add(KnowledgeChunk(source_id=source.id, user_id=source.user_id, ordinal=ordinal, content=content))
+            for ordinal, (content, vector) in enumerate(zip(chunks, vectors)):
+                db.add(KnowledgeChunk(source_id=source.id, user_id=source.user_id, ordinal=ordinal, content=content, embedding=vector))
             source.chunk_count, source.status, source.error = len(chunks), "ready", None
             db.commit()
         except Exception as exc:
